@@ -530,6 +530,65 @@ bool DatabaseManager::open(const std::wstring& local_db_file_path, const std::ws
     return true;
 }
 
+bool DatabaseManager::create_document_layout_table() {
+    std::lock_guard<std::recursive_mutex> lock(db_mutex);
+    // Additive table; no change to existing bookmarks, highlights, or PRAGMA user_version.
+    const char* sql = "CREATE TABLE IF NOT EXISTS document_layout_settings ("
+        "document_checksum TEXT PRIMARY KEY, "
+        "two_page_mode INTEGER NOT NULL CHECK(two_page_mode IN (0, 1)), "
+        "right_to_left INTEGER NOT NULL CHECK(right_to_left IN (0, 1)), "
+        "recto_verso_adjustment INTEGER NOT NULL CHECK(recto_verso_adjustment IN (0, 1)))";
+    char* message = nullptr;
+    int result = sqlite3_exec(global_db, sql, nullptr, nullptr, &message);
+    return handle_error("create_document_layout_table", result, message);
+}
+
+std::optional<DocumentLayoutSettings> DatabaseManager::select_document_layout(const std::string& checksum) {
+    std::lock_guard<std::recursive_mutex> lock(db_mutex);
+    const char* sql = "SELECT two_page_mode, right_to_left, recto_verso_adjustment "
+        "FROM document_layout_settings WHERE document_checksum = ?1";
+    sqlite3_stmt* stmt = nullptr;
+    if (sqlite3_prepare_v2(global_db, sql, -1, &stmt, nullptr) != SQLITE_OK) {
+        qWarning() << "Could not read document layout:" << sqlite3_errmsg(global_db);
+        return {};
+    }
+    sqlite3_bind_text(stmt, 1, checksum.c_str(), -1, SQLITE_TRANSIENT);
+    std::optional<DocumentLayoutSettings> result;
+    int status = sqlite3_step(stmt);
+    if (status == SQLITE_ROW) {
+        result = DocumentLayoutSettings{
+            sqlite3_column_int(stmt, 0) != 0,
+            sqlite3_column_int(stmt, 1) != 0,
+            sqlite3_column_int(stmt, 2) != 0
+        };
+    }
+    else if (status != SQLITE_DONE) {
+        qWarning() << "Could not read document layout:" << sqlite3_errmsg(global_db);
+    }
+    sqlite3_finalize(stmt);
+    return result;
+}
+
+bool DatabaseManager::save_document_layout(const std::string& checksum, const DocumentLayoutSettings& layout) {
+    std::lock_guard<std::recursive_mutex> lock(db_mutex);
+    const char* sql = "INSERT OR REPLACE INTO document_layout_settings "
+        "(document_checksum, two_page_mode, right_to_left, recto_verso_adjustment) "
+        "VALUES (?1, ?2, ?3, ?4)";
+    sqlite3_stmt* stmt = nullptr;
+    if (sqlite3_prepare_v2(global_db, sql, -1, &stmt, nullptr) != SQLITE_OK) {
+        qWarning() << "Could not save document layout:" << sqlite3_errmsg(global_db);
+        return false;
+    }
+    sqlite3_bind_text(stmt, 1, checksum.c_str(), -1, SQLITE_TRANSIENT);
+    sqlite3_bind_int(stmt, 2, layout.two_page_mode ? 1 : 0);
+    sqlite3_bind_int(stmt, 3, layout.right_to_left ? 1 : 0);
+    sqlite3_bind_int(stmt, 4, layout.recto_verso_adjustment ? 1 : 0);
+    bool ok = sqlite3_step(stmt) == SQLITE_DONE;
+    if (!ok) qWarning() << "Could not save document layout:" << sqlite3_errmsg(global_db);
+    sqlite3_finalize(stmt);
+    return ok;
+}
+
 bool DatabaseManager::create_opened_books_table() {
     std::lock_guard<std::recursive_mutex> lock(db_mutex);
 
@@ -1254,6 +1313,7 @@ bool DatabaseManager::select_links(const std::string& src_document_path, std::ve
 void DatabaseManager::create_tables() {
     std::lock_guard<std::recursive_mutex> lock(db_mutex);
     create_opened_books_table();
+    create_document_layout_table();
     create_marks_table();
     create_bookmarks_table();
     create_highlights_table();

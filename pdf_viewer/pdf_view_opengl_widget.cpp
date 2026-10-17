@@ -23,7 +23,6 @@
 #define GL_PRIMITIVE_RESTART_FIXED_INDEX  0x8D69
 #endif
 
-extern bool RECTO_VERSO_ADJUSTMENT;
 extern bool DEBUG_DISPLAY_FREEHAND_POINTS;
 extern bool DEBUG_SMOOTH_FREEHAND_DRAWINGS;
 extern Path shader_path;
@@ -1440,7 +1439,7 @@ void PdfViewOpenGLWidget::my_render(QPainter* painter) {
         }
         render_page(presentation_page_number);
         if (document_view->is_two_page_mode()) {
-            int other_page = presentation_page_number + ((presentation_page_number + static_cast<int>(RECTO_VERSO_ADJUSTMENT)) % 2 ? -1 : 1);
+            int other_page = presentation_page_number + ((presentation_page_number + static_cast<int>(document_view->get_recto_verso_adjustment())) % 2 ? -1 : 1);
             if (other_page >= 0 && other_page < doc()->num_pages())
                 render_page(other_page);
         }

@@ -11,6 +11,13 @@
 
 class CachedChecksummer;
 
+// Reading layout is stored by document checksum, so renaming a PDF keeps its layout.
+struct DocumentLayoutSettings {
+    bool two_page_mode = false;
+    bool right_to_left = false;
+    bool recto_verso_adjustment = false;
+};
+
 struct MarkInDatabase {
     std::string checksum;
     char symbol;
@@ -25,6 +32,7 @@ private:
     std::recursive_mutex db_mutex;
     sqlite3* local_db;
     sqlite3* global_db;
+    bool create_document_layout_table();
     bool create_opened_books_table();
     bool create_marks_table();
     bool create_bookmarks_table();
@@ -35,6 +43,8 @@ private:
 public:
     bool open(const std::wstring& local_db_file_path, const std::wstring& global_db_file_path);
     bool select_opened_book(const std::string& book_path, std::vector<OpenedBookState>& out_result);
+    std::optional<DocumentLayoutSettings> select_document_layout(const std::string& document_checksum);
+    bool save_document_layout(const std::string& document_checksum, const DocumentLayoutSettings& layout);
     bool insert_mark(const std::string& checksum,
         char symbol,
         float offset_y,

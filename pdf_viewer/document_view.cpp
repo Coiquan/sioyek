@@ -37,6 +37,8 @@ DocumentView::DocumentView(DatabaseManager* db_manager,
 {
     page_space_x = PAGE_SPACE_X;
     page_space_y = PAGE_SPACE_Y;
+    // Config value is the default for PDFs without a saved layout.
+    recto_verso_adjustment_ = RECTO_VERSO_ADJUSTMENT;
 }
 DocumentView::~DocumentView() {
 }
@@ -796,6 +798,20 @@ void DocumentView::open_document(const std::wstring& doc_path,
 
     reset_doc_state();
 
+    // Restore each document's own facing-page settings, before fitting/restoring zoom.
+    // No record means the original single-page/default alignment behavior.
+    two_page_mode = false;
+    right_to_left_two_page_mode = false;
+    recto_verso_adjustment_ = RECTO_VERSO_ADJUSTMENT;
+    if (current_document) {
+        auto saved_layout = db_manager->select_document_layout(current_document->get_checksum());
+        if (saved_layout) {
+            two_page_mode = saved_layout->two_page_mode;
+            right_to_left_two_page_mode = saved_layout->right_to_left;
+            recto_verso_adjustment_ = saved_layout->recto_verso_adjustment;
+        }
+    }
+
     if (prev_state) {
         zoom_level = prev_state.value().zoom_level;
         AbsoluteDocumentPos prev_offset;
@@ -927,7 +943,7 @@ void DocumentView::fit_to_page_width(bool smart, bool ratio) {
 
         if (two_page_mode) {
             int num_pages = current_document->num_pages();
-            int other_page = cp + ((cp + static_cast<int>(RECTO_VERSO_ADJUSTMENT)) % 2 ? -1 : 1);
+            int other_page = cp + ((cp + static_cast<int>(recto_verso_adjustment_)) % 2 ? -1 : 1);
             if (other_page < 0 || other_page >= num_pages) {
                 other_page = cp;  // unpaired cover or last page
             }
@@ -998,7 +1014,7 @@ void DocumentView::fit_to_page_height_width_minimum(int statusbar_height) {
 
     if (two_page_mode) {
         fill_cached_virtual_rects();
-        int other_page = cp + ((cp + static_cast<int>(RECTO_VERSO_ADJUSTMENT)) % 2 ? -1 : 1);
+        int other_page = cp + ((cp + static_cast<int>(recto_verso_adjustment_)) % 2 ? -1 : 1);
         VirtualRect bounds = cached_virtual_rects[cp];
         if (other_page >= 0 && other_page < current_document->num_pages())
             bounds = bounds.union_rect(cached_virtual_rects[other_page]);
@@ -2107,7 +2123,7 @@ void DocumentView::fill_cached_virtual_rects(bool force) {
                 page_rect.y1 = cum_offset + page_height;
 
                 float mult = 1.0f;
-                if ((i + (int)RECTO_VERSO_ADJUSTMENT) % 2 == 1) {
+                if ((i + (int)recto_verso_adjustment_) % 2 == 1) {
                     cum_offset += page_height + page_space_y;
                 }
                 else {
@@ -2197,6 +2213,12 @@ WindowPos DocumentView::virtual_to_window_pos(const VirtualPos& vpos) {
     return res;
 }
 
+void DocumentView::save_current_document_layout() {
+    if (!current_document) return;
+    db_manager->save_document_layout(current_document->get_checksum(),
+        DocumentLayoutSettings{two_page_mode, right_to_left_two_page_mode, recto_verso_adjustment_});
+}
+
 void DocumentView::toggle_two_page(){
     AbsoluteDocumentPos current_abs_offset = get_offsets();
 
@@ -2206,10 +2228,29 @@ void DocumentView::toggle_two_page(){
 
     set_offsets(current_abs_offset.x, current_abs_offset.y);
     fit_to_page_width();
+    save_current_document_layout();
+}
+
+void DocumentView::toggle_recto_verso_adjustment() {
+    set_recto_verso_adjustment(!recto_verso_adjustment_);
+}
+
+void DocumentView::set_recto_verso_adjustment(bool enabled) {
+    recto_verso_adjustment_ = enabled;
+    save_current_document_layout();
+    if (two_page_mode && current_document) {
+        const float previous_y = offset.y;
+        cached_virtual_rects.clear();
+        fill_cached_virtual_rects(true);
+        offset.x = 0.0f;
+        offset.y = previous_y;
+        fit_to_page_width();
+    }
 }
 
 void DocumentView::toggle_two_page_reading_direction() {
     right_to_left_two_page_mode = !right_to_left_two_page_mode;
+    save_current_document_layout();
     if (!two_page_mode || !current_document) {
         return;
     }
@@ -2229,6 +2270,10 @@ NormalizedWindowRect DocumentView::virtual_to_normalized_window_rect(const Virtu
     NormalizedWindowPos top_left = virtual_to_window_pos(VirtualPos{ virtual_rect.x0, virtual_rect.y0 }).to_window_normalized(this);
     NormalizedWindowPos bottom_right = virtual_to_window_pos(VirtualPos{ virtual_rect.x1, virtual_rect.y1 }).to_window_normalized(this);
     return NormalizedWindowRect(top_left, bottom_right);
+}
+
+bool DocumentView::get_recto_verso_adjustment() const {
+    return recto_verso_adjustment_;
 }
 
 bool DocumentView::is_two_page_mode() {

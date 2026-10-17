@@ -2093,6 +2093,7 @@ void MainWidget::open_document(const std::wstring& path, std::optional<float> of
 
     main_document_view->on_view_size_change(main_window_width, main_window_height);
     main_document_view->open_document(path, &this->is_render_invalidated);
+    update_two_page_render_cache();
     if (!doc()){
         // failed to open document
         return;
@@ -4552,6 +4553,7 @@ void MainWidget::open_document(const std::wstring& doc_path,
     }
 
     main_document_view->open_document(doc_path, invalid_flag, load_prev_state, prev_state, force_load_dimensions);
+    update_two_page_render_cache();
 
     if (doc()) {
         document_manager->add_tab(doc()->get_path());
@@ -8090,7 +8092,11 @@ void MainWidget::on_configs_changed(std::vector<std::string>* config_names) {
             should_invalidate_render = true;
         }
         if (confname == "recto_verso_adjustment") {
-            dv()->fill_cached_virtual_rects(true);
+            // setconfig_/setsaveconfig_ explicitly updates the current PDF.
+            // toggleconfig_ is handled separately and does not modify this default.
+            if (main_document_view_has_document()) {
+                dv()->set_recto_verso_adjustment(RECTO_VERSO_ADJUSTMENT);
+            }
         }
         if (confname == "highlight_links") {
             opengl_widget->set_highlight_links(SHOULD_HIGHLIGHT_LINKS, false);
@@ -10391,6 +10397,7 @@ void MainWidget::document_views_open_path(const std::vector<DocumentView*>& docu
     for (int i = 0; i < document_views.size(); i++) {
         if (is_helpers[i]) {
             document_views[i]->open_document(new_path, &main_widgets[i]->is_render_invalidated);
+            main_widgets[i]->update_two_page_render_cache();
         }
         else{
             main_widgets[i]->open_document(new_path);
@@ -11377,16 +11384,21 @@ void MainWidget::handle_move_smooth_hold(bool down) {
     last_speed_update_time = QTime::currentTime();
 }
 
+void MainWidget::update_two_page_render_cache() {
+    if (NUM_CACHED_PAGES < 6) {
+        pdf_renderer->set_num_cached_pages(main_document_view->is_two_page_mode()
+            ? NUM_CACHED_PAGES * 2 : NUM_CACHED_PAGES);
+    }
+}
+
 void MainWidget::handle_toggle_two_page_mode() {
     main_document_view->toggle_two_page();
-    if (NUM_CACHED_PAGES < 6) {
-        if (main_document_view->is_two_page_mode()) {
-            pdf_renderer->set_num_cached_pages(NUM_CACHED_PAGES * 2);
-        }
-        else {
-            pdf_renderer->set_num_cached_pages(NUM_CACHED_PAGES);
-        }
-    }
+    update_two_page_render_cache();
+}
+
+void MainWidget::handle_toggle_recto_verso_adjustment() {
+    main_document_view->toggle_recto_verso_adjustment();
+    validate_render();
 }
 
 
@@ -11911,6 +11923,8 @@ void MainWidget::set_state(QJsonObject state) {
             main_document_view->open_document(path.value(), &this->is_render_invalidated);
         }
     }
+
+    if (main_document_view_has_document()) update_two_page_render_cache();
 
     if (state.contains("x_offset")) {
         float x_offset = state["x_offset"].toDouble();

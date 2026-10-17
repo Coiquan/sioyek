@@ -1033,6 +1033,8 @@ public:
     void handle_move_smooth_horizontal_hold(bool left);
     void handle_toggle_two_page_mode();
     void handle_toggle_two_page_reading_direction();
+    void handle_toggle_recto_verso_adjustment();
+    void update_two_page_render_cache();
     void ensure_zero_interval_timer();
     void set_last_performed_command(std::unique_ptr<Command> command);
     void make_current_menu_columns_equal();

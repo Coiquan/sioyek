@@ -6780,6 +6780,11 @@ public:
 	}
 
 	void perform() {
+        // Per-document alignment: keep the global config as the default for unseen PDFs.
+        if (config_name == "recto_verso_adjustment" && widget->main_document_view_has_document()) {
+            widget->handle_toggle_recto_verso_adjustment();
+            return;
+        }
         //widget->config_manager->deserialize_config(config_name, text.value());
         auto conf = widget->config_manager->get_mut_config_with_name(utf8_decode(config_name));
         *(bool*)conf->value = !*(bool*)conf->value;
