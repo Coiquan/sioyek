@@ -958,6 +958,8 @@ public:
     QStringListModel* get_new_command_list_model();
     void add_password(std::wstring path, std::string password);
     void handle_fit_to_page_width(bool smart);
+    // Height of the bottom overlay, or zero when it is hidden.
+    int get_visible_status_bar_height() const;
     int current_document_page_count();
     void goto_search_result(int nth_next_result, bool overview=false);
     void set_should_highlight_words(bool should_highlight_words);

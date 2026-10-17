@@ -181,8 +181,9 @@ public:
     void goto_offset_within_page(int page, float offset_y);
     void goto_page(int page);
     void fit_to_page_width(bool smart = false, bool ratio = false);
-    void fit_to_page_height(bool smart = false);
-    void fit_to_page_height_and_width_smart();
+    // statusbar_height is the actually visible bottom overlay, in view pixels.
+    void fit_to_page_height(bool smart = false, int statusbar_height = 0);
+    void fit_to_page_height_and_width_smart(int statusbar_height = 0);
     void fit_to_page_height_width_minimum(int statusbar_height);
     void persist(bool persist_drawings = false);
     std::wstring get_current_chapter_name();

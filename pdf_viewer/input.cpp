@@ -3443,7 +3443,7 @@ public:
     static inline const std::string hname = "";
     FitToPageSmartCommand(MainWidget* w) : Command(cname, w) {};
     void perform() {
-        widget->main_document_view->fit_to_page_height_and_width_smart();
+        widget->main_document_view->fit_to_page_height_and_width_smart(widget->get_visible_status_bar_height());
     }
 
 };
@@ -3464,7 +3464,7 @@ public:
     static inline const std::string hname = "Fit the page to screen height";
     FitToPageHeightCommand(MainWidget* w) : Command(cname, w) {};
     void perform() {
-        widget->main_document_view->fit_to_page_height();
+        widget->main_document_view->fit_to_page_height(false, widget->get_visible_status_bar_height());
         widget->last_smart_fit_page = {};
     }
 };
@@ -3475,7 +3475,7 @@ public:
     static inline const std::string hname = "Fit the page to screen height, ignoring white page margins";
     FitToPageHeightSmartCommand(MainWidget* w) : Command(cname, w) {};
     void perform() {
-        widget->main_document_view->fit_to_page_height(true);
+        widget->main_document_view->fit_to_page_height(true, widget->get_visible_status_bar_height());
     }
 };
 

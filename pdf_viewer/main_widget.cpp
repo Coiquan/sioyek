@@ -1839,10 +1839,10 @@ void MainWidget::validate_render() {
                     main_document_view->get_document()->get_page_height(current_page) / 2 + statusbar_factor);
             }
             if (IGNORE_WHITESPACE_IN_PRESENTATION_MODE && !main_document_view->is_two_page_mode()) {
-                main_document_view->fit_to_page_height(true);
+                main_document_view->fit_to_page_height(true, get_visible_status_bar_height());
             }
             else {
-                main_document_view->fit_to_page_height_width_minimum(status_label->isVisible() ? status_label->height() : 0);
+                main_document_view->fit_to_page_height_width_minimum(get_visible_status_bar_height());
             }
         }
     }
@@ -11389,6 +11389,10 @@ void MainWidget::update_two_page_render_cache() {
         pdf_renderer->set_num_cached_pages(main_document_view->is_two_page_mode()
             ? NUM_CACHED_PAGES * 2 : NUM_CACHED_PAGES);
     }
+}
+
+int MainWidget::get_visible_status_bar_height() const {
+    return status_label && status_label->isVisible() ? status_label->height() : 0;
 }
 
 void MainWidget::handle_toggle_two_page_mode() {

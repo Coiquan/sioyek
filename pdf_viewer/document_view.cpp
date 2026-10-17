@@ -884,7 +884,7 @@ void DocumentView::goto_page(int page) {
 //	set_offset_y(get_page_offset(page) + view_height_in_document_space()/2);
 //}
 
-void DocumentView::fit_to_page_height_and_width_smart() {
+void DocumentView::fit_to_page_height_and_width_smart(int statusbar_height) {
 
     int cp = get_center_page_number();
     if (cp == -1) return;
@@ -902,17 +902,26 @@ void DocumentView::fit_to_page_height_and_width_smart() {
     float height_imbalance = top_ratio - bottom_leftover;
     float width_imbalance = left_ratio - right_leftover;
 
-    float height_zoom_level = static_cast<float>(view_height - 20) / page_height;
+    // The status bar is drawn over the OpenGL viewport, not outside it.
+    // Reserve its actual visible height plus the previous 20-pixel margin.
+    const int obscured_height = std::clamp(statusbar_height, 0, std::max(0, view_height - 1));
+    const int available_height = std::max(1, view_height - obscured_height - 20);
+    float height_zoom_level = static_cast<float>(available_height) / page_height;
     float width_zoom_level = static_cast<float>(view_width - 20) / page_width;
 
     float best_zoom_level = 1.0f;
 
     set_zoom_level(qMin(width_zoom_level, height_zoom_level), true);
-    goto_offset_within_page(cp, (height_imbalance / 2.0f + 0.5f) * normal_page_height);
+    // Center in the area above the status bar, not in the entire viewport.
+    // Exact fit can legitimately sit outside the normal scroll bounds near
+    // the first/last page. Do not let those bounds undo the adjusted center.
+    set_offsets(get_offset_x(), get_page_offset(cp)
+        + (height_imbalance / 2.0f + 0.5f) * normal_page_height
+        + obscured_height / (2.0f * get_zoom_level()), true);
     set_offset_x(-width_imbalance * normal_page_width / 2.0f);
 }
 
-void DocumentView::fit_to_page_height(bool smart) {
+void DocumentView::fit_to_page_height(bool smart, int statusbar_height) {
     int cp = get_center_page_number();
     if (cp == -1) return;
 
@@ -927,9 +936,13 @@ void DocumentView::fit_to_page_height(bool smart) {
         imbalance = 0;
     }
 
-    set_zoom_level(static_cast<float>(view_height - 20) / page_height, true);
-    //set_offset_y(-imbalance * normal_page_height / 2.0f);
-    goto_offset_within_page(cp, (imbalance / 2.0f + 0.5f) * normal_page_height);
+    const int obscured_height = std::clamp(statusbar_height, 0, std::max(0, view_height - 1));
+    const int available_height = std::max(1, view_height - obscured_height - 20);
+    set_zoom_level(static_cast<float>(available_height) / page_height, true);
+    // The OpenGL view includes the status bar; shift the page up by half of it.
+    set_offsets(get_offset_x(), get_page_offset(cp)
+        + (imbalance / 2.0f + 0.5f) * normal_page_height
+        + obscured_height / (2.0f * get_zoom_level()), true);
 }
 
 void DocumentView::fit_to_page_width(bool smart, bool ratio) {
