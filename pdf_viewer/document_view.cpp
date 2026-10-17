@@ -11,6 +11,7 @@
 
 extern float MOVE_SCREEN_PERCENTAGE;
 extern float FIT_TO_PAGE_WIDTH_RATIO;
+extern int FIT_TO_PAGE_HEIGHT_MARGIN;
 extern float RULER_PADDING;
 extern float RULER_X_PADDING;
 extern bool EXACT_HIGHLIGHT_SELECT;
@@ -903,9 +904,9 @@ void DocumentView::fit_to_page_height_and_width_smart(int statusbar_height) {
     float width_imbalance = left_ratio - right_leftover;
 
     // The status bar is drawn over the OpenGL viewport, not outside it.
-    // Reserve its actual visible height plus the previous 20-pixel margin.
+    // Reserve the actual status bar height and the configurable vertical margin.
     const int obscured_height = std::clamp(statusbar_height, 0, std::max(0, view_height - 1));
-    const int available_height = std::max(1, view_height - obscured_height - 20);
+    const int available_height = std::max(1, view_height - obscured_height - 2 * FIT_TO_PAGE_HEIGHT_MARGIN);
     float height_zoom_level = static_cast<float>(available_height) / page_height;
     float width_zoom_level = static_cast<float>(view_width - 20) / page_width;
 
@@ -937,7 +938,7 @@ void DocumentView::fit_to_page_height(bool smart, int statusbar_height) {
     }
 
     const int obscured_height = std::clamp(statusbar_height, 0, std::max(0, view_height - 1));
-    const int available_height = std::max(1, view_height - obscured_height - 20);
+    const int available_height = std::max(1, view_height - obscured_height - 2 * FIT_TO_PAGE_HEIGHT_MARGIN);
     set_zoom_level(static_cast<float>(available_height) / page_height, true);
     // The OpenGL view includes the status bar; shift the page up by half of it.
     set_offsets(get_offset_x(), get_page_offset(cp)
