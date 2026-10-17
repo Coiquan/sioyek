@@ -12,6 +12,7 @@
 extern float MOVE_SCREEN_PERCENTAGE;
 extern float FIT_TO_PAGE_WIDTH_RATIO;
 extern int FIT_TO_PAGE_HEIGHT_MARGIN;
+extern int FIT_TO_PAGE_WIDTH_MARGIN;
 extern float RULER_PADDING;
 extern float RULER_X_PADDING;
 extern bool EXACT_HIGHLIGHT_SELECT;
@@ -102,6 +103,7 @@ void DocumentView::set_book_state(OpenedBookState state) {
     ruler_pos = state.ruler_pos;
     ruler_rect = state.ruler_rect;
     line_index = state.line_index;
+    center_two_page_spread();
 }
 
 bool DocumentView::set_pos(AbsoluteDocumentPos pos) {
@@ -847,6 +849,10 @@ void DocumentView::open_document(const std::wstring& doc_path,
             }
         }
     }
+
+    // Saved book offsets use coordinates relative to one PDF page. In facing-page
+    // mode the viewport must instead be centered on the shared gutter (virtual x=0).
+    center_two_page_spread();
 }
 
 float DocumentView::get_page_offset(int page) {
@@ -908,7 +914,8 @@ void DocumentView::fit_to_page_height_and_width_smart(int statusbar_height) {
     const int obscured_height = std::clamp(statusbar_height, 0, std::max(0, view_height - 1));
     const int available_height = std::max(1, view_height - obscured_height - 2 * FIT_TO_PAGE_HEIGHT_MARGIN);
     float height_zoom_level = static_cast<float>(available_height) / page_height;
-    float width_zoom_level = static_cast<float>(view_width - 20) / page_width;
+    const int available_width = std::max(1, view_width - 2 * FIT_TO_PAGE_WIDTH_MARGIN);
+    float width_zoom_level = static_cast<float>(available_width) / page_width;
 
     float best_zoom_level = 1.0f;
 
@@ -952,6 +959,9 @@ void DocumentView::fit_to_page_width(bool smart, bool ratio) {
     int cp = get_center_page_number();
     if (cp == -1) return;
 
+    // Leave the configured margin at both physical edges of the viewport.
+    const int available_width = std::max(1, view_width - 2 * FIT_TO_PAGE_WIDTH_MARGIN);
+
     //int page_width = current_document->get_page_width(cp);
     if (smart) {
 
@@ -981,7 +991,7 @@ void DocumentView::fit_to_page_width(bool smart, bool ratio) {
             page_space_x = -(left_normal_page_width * (1 - left_right_ratio) + right_normal_page_width * right_left_ratio) / 2;
             cached_virtual_rects.clear();
 
-            set_zoom_level(static_cast<float>(view_width) / (left_page_width + right_page_width + page_space_x * 2), false);
+            set_zoom_level(static_cast<float>(available_width) / (left_page_width + right_page_width + page_space_x * 2), false);
             offset.x = -imbalance * (left_normal_page_width + right_normal_page_width + page_space_x * 2) / 4.0f;
         }
 
@@ -992,7 +1002,7 @@ void DocumentView::fit_to_page_width(bool smart, bool ratio) {
             float right_leftover = 1.0f - right_ratio;
             float imbalance = left_ratio - right_leftover;
 
-            set_zoom_level(static_cast<float>(view_width) / page_width, false);
+            set_zoom_level(static_cast<float>(available_width) / page_width, false);
             set_offset_x(-imbalance * normal_page_width / 2.0f);
         }
     }
@@ -1001,10 +1011,11 @@ void DocumentView::fit_to_page_width(bool smart, bool ratio) {
         if (SAME_WIDTH && same_width_mode_first_page_width.has_value()) {
             page_width = same_width_mode_first_page_width.value();
         }
-        int virtual_view_width = view_width;
+        int virtual_view_width = available_width;
 
         if (ratio) {
-            virtual_view_width = static_cast<int>(static_cast<float>(view_width) * FIT_TO_PAGE_WIDTH_RATIO);
+            virtual_view_width = std::max(1, static_cast<int>(view_width * FIT_TO_PAGE_WIDTH_RATIO)
+                - 2 * FIT_TO_PAGE_WIDTH_MARGIN);
         }
 
         if (two_page_mode) {
@@ -2231,6 +2242,14 @@ void DocumentView::save_current_document_layout() {
     if (!current_document) return;
     db_manager->save_document_layout(current_document->get_checksum(),
         DocumentLayoutSettings{two_page_mode, right_to_left_two_page_mode, recto_verso_adjustment_});
+}
+
+void DocumentView::center_two_page_spread() {
+    if (current_document && two_page_mode) {
+        // Do NOT call set_offset_x(0): it converts page-local coordinates back
+        // into the virtual space and centers an individual page instead.
+        offset.x = 0.0f;
+    }
 }
 
 void DocumentView::toggle_two_page(){

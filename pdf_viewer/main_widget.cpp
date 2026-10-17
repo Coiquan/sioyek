@@ -2068,8 +2068,9 @@ void MainWidget::adjust_two_page_mode_document_zoom_and_offset(std::wstring doc_
     if (main_document_view->is_two_page_mode()){
         for (int i = history.size() - 1; i >= 0; i--){
             if (history[i].document_path == doc_path){
-                main_document_view->set_offset_x(history[i].book_state.offset_x);
                 main_document_view->set_zoom_level(history[i].book_state.zoom_level, true);
+                // The saved x is relative to a single page, not the facing-page gutter.
+                main_document_view->center_two_page_spread();
                 return;
             }
         }
@@ -2139,6 +2140,7 @@ void MainWidget::open_document(const std::wstring& path, std::optional<float> of
     if (zoom_level) {
         main_document_view->set_zoom_level(zoom_level.value(), true);
     }
+    main_document_view->center_two_page_spread();
 
     // reset smart fit when changing documents
     last_smart_fit_page = {};
@@ -11962,6 +11964,8 @@ void MainWidget::set_state(QJsonObject state) {
         resize(width(), new_height);
     }
 
+    // Restore the facing-page gutter even if a session state supplied an x offset.
+    main_document_view->center_two_page_spread();
 
     invalidate_render();
 

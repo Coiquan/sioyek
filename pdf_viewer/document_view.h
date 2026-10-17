@@ -242,6 +242,8 @@ public:
     VirtualPos window_to_virtual_pos(const WindowPos& window_pos);
     WindowPos virtual_to_window_pos(const VirtualPos& virtual_pos);
     NormalizedWindowRect virtual_to_normalized_window_rect(const VirtualRect& virtual_rect);
+    // Align the facing-page gutter with the viewport center without moving vertically.
+    void center_two_page_spread();
     void toggle_two_page();
     void toggle_two_page_reading_direction();
     void toggle_recto_verso_adjustment();

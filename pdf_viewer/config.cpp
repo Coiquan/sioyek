@@ -191,6 +191,7 @@ float DISPLAY_RESOLUTION_SCALE = -1;
 float FIT_TO_PAGE_WIDTH_RATIO = 0.75;
 // Extra space reserved on each side when fitting a page to the view height.
 int FIT_TO_PAGE_HEIGHT_MARGIN = 10;
+int FIT_TO_PAGE_WIDTH_MARGIN = 10;
 int MAIN_WINDOW_SIZE[2] = { -1, -1 };
 int HELPER_WINDOW_SIZE[2] = { -1, -1 };
 int MAIN_WINDOW_MOVE[2] = { -1, -1 };
@@ -945,6 +946,7 @@ ConfigManager::ConfigManager(const Path& default_path, const Path& auto_path, co
     add_float(L"page_separator_width", &PAGE_SEPARATOR_WIDTH, FloatExtras{0.0f, 10.0f});
     add_float(L"fit_to_page_width_ratio", &FIT_TO_PAGE_WIDTH_RATIO, FloatExtras{0.25f, 1.0f});
     add_int(L"fit_to_page_height_margin", &FIT_TO_PAGE_HEIGHT_MARGIN, IntExtras{0, 1000});
+    add_int(L"fit_to_page_width_margin", &FIT_TO_PAGE_WIDTH_MARGIN, IntExtras{0, 1000});
     add_float(L"ruler_padding", &RULER_PADDING, FloatExtras{0.0f, 10.0f});
     add_float(L"ruler_x_padding", &RULER_X_PADDING, FloatExtras{0.0f, 10.0f});
     add_float(L"ruler_auto_move_sensitivity", &RULER_AUTO_MOVE_SENSITIVITY, FloatExtras{0.0f, 200.0f});
