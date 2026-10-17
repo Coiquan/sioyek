@@ -98,6 +98,25 @@ jobs:
       working-directory: ${{env.GITHUB_WORKSPACE}}
       run: .\build_windows.bat portable
 
+    - name: Validate Windows build
+      shell: pwsh
+      run: |
+        $required = @(
+          "sioyek-release-windows/sioyek.exe"
+          "sioyek-release-windows/Qt6Core.dll"
+          "sioyek-release-windows/Qt6Gui.dll"
+          "sioyek-release-windows/Qt6Widgets.dll"
+          "sioyek-release-windows/platforms/qwindows.dll"
+        )
+
+        foreach ($file in $required) {
+          if (-not (Test-Path $file)) {
+            throw "Missing build output: $file"
+          }
+        }
+
+        Write-Host "Windows portable build validated."
+
     - name: Upload Windows portable artifact
       uses: actions/upload-artifact@v7
       with:

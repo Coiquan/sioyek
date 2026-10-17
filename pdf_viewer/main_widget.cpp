@@ -107,6 +107,7 @@ extern "C" void hideWindowTitleBar(WId);
 extern int next_window_id;
 
 extern bool SHOULD_USE_MULTIPLE_MONITORS;
+extern bool RECTO_VERSO_ADJUSTMENT;
 extern bool FAIL_SAFE_AUTO_SAVE_SESSION;
 extern bool MULTILINE_MENUS;
 extern bool SORT_BOOKMARKS_BY_LOCATION;
