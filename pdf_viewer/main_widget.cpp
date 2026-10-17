@@ -11390,6 +11390,11 @@ void MainWidget::handle_toggle_two_page_mode() {
 }
 
 
+void MainWidget::handle_toggle_two_page_reading_direction() {
+    main_document_view->toggle_two_page_reading_direction();
+    validate_render();
+}
+
 void MainWidget::ensure_zero_interval_timer(){
     validation_interval_timer->setInterval(INTERVAL_TIME);
 }
@@ -11675,6 +11680,7 @@ QMenuBar* MainWidget::create_main_menu_bar(){
             new MenuNode{ "toggle_presentation_mode", "", {} },
             new MenuNode{ "-", "", {} },
             new MenuNode{ "toggle_two_page_mode", "", {} },
+            new MenuNode{ "toggle_two_page_reading_direction", "", {} },
             new MenuNode{ "toggle_dark_mode", "", {} },
             new MenuNode{ "toggle_custom_color", "", {} },
             new MenuNode{ "toggle_scrollbar", "", {} },

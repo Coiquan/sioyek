@@ -3249,6 +3249,17 @@ public:
     }
 };
 
+class ToggleTwoPageReadingDirectionCommand : public Command {
+public:
+    static inline const std::string cname = "toggle_two_page_reading_direction";
+    static inline const std::string hname = "Toggle two-page reading direction (LTR/RTL)";
+    ToggleTwoPageReadingDirectionCommand(MainWidget* w) : Command(cname, w) {};
+
+    void perform() {
+        widget->handle_toggle_two_page_reading_direction();
+    }
+};
+
 class FitEpubToWindowCommand : public Command {
 public:
     static inline const std::string cname = "fit_epub_to_window";
@@ -7247,6 +7258,7 @@ CommandManager::CommandManager(ConfigManager* config_manager) {
     register_command<RegexSearchCommand>();
     register_command<ChapterSearchCommand>();
     register_command<ToggleTwoPageModeCommand>();
+    register_command<ToggleTwoPageReadingDirectionCommand>();
     register_command<FitEpubToWindowCommand>();
     register_command<MoveDownCommand>();
     register_command<MoveUpCommand>();

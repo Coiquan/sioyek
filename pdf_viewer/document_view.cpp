@@ -927,22 +927,21 @@ void DocumentView::fit_to_page_width(bool smart, bool ratio) {
 
         if (two_page_mode) {
             int num_pages = current_document->num_pages();
-            int other_page = cp;
-            if (cp % 2 == 0) {
-                if (cp + 1 < num_pages) {
-                    other_page = cp + 1;
-                }
+            int other_page = cp + ((cp + static_cast<int>(RECTO_VERSO_ADJUSTMENT)) % 2 ? -1 : 1);
+            if (other_page < 0 || other_page >= num_pages) {
+                other_page = cp;  // unpaired cover or last page
             }
-            else {
-                other_page = cp - 1;
-            }
+            const int left_page = right_to_left_two_page_mode
+                ? std::max(cp, other_page) : std::min(cp, other_page);
+            const int right_page = right_to_left_two_page_mode
+                ? std::min(cp, other_page) : std::max(cp, other_page);
             float left_left_ratio, left_right_ratio;
             int left_normal_page_width;
-            float left_page_width = current_document->get_page_size_smart(true, cp, &left_left_ratio, &left_right_ratio, &left_normal_page_width);
+            float left_page_width = current_document->get_page_size_smart(true, left_page, &left_left_ratio, &left_right_ratio, &left_normal_page_width);
 
             float right_left_ratio, right_right_ratio;
             int right_normal_page_width;
-            float right_page_width = current_document->get_page_size_smart(true, other_page, &right_left_ratio, &right_right_ratio, &right_normal_page_width);
+            float right_page_width = current_document->get_page_size_smart(true, right_page, &right_left_ratio, &right_right_ratio, &right_normal_page_width);
 
             float right_leftover = 1.0f - right_right_ratio;
             float imbalance = left_left_ratio - right_leftover;
@@ -2115,6 +2114,12 @@ void DocumentView::fill_cached_virtual_rects(bool force) {
                     mult = -1.0f;
                 }
 
+                // Swap the physical left/right placement for right-to-left books.
+                // All hit-testing and annotations reuse these virtual page rects.
+                if (right_to_left_two_page_mode) {
+                    mult = -mult;
+                }
+
                 if (page_space_x >= 0) {
                     page_rect.x0 += mult * (page_width + page_space_x) / 2;
                     page_rect.x1 += mult * (page_width + page_space_x) / 2;
@@ -2200,6 +2205,22 @@ void DocumentView::toggle_two_page(){
     fill_cached_virtual_rects();
 
     set_offsets(current_abs_offset.x, current_abs_offset.y);
+    fit_to_page_width();
+}
+
+void DocumentView::toggle_two_page_reading_direction() {
+    right_to_left_two_page_mode = !right_to_left_two_page_mode;
+    if (!two_page_mode || !current_document) {
+        return;
+    }
+
+    // Both pages in a spread retain their vertical positions. Keeping the
+    // virtual Y coordinate avoids jumping to a different spread on F3.
+    const float previous_y = offset.y;
+    cached_virtual_rects.clear();
+    fill_cached_virtual_rects(true);
+    offset.x = 0.0f;
+    offset.y = previous_y;
     fit_to_page_width();
 }
 

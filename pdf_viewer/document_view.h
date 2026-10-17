@@ -40,6 +40,8 @@ protected:
     VirtualPos offset = {0, 0};
     std::vector<VirtualRect> cached_virtual_rects;
     bool two_page_mode = false;
+    // Physical placement of facing pages. The logical PDF page order is unchanged.
+    bool right_to_left_two_page_mode = false;
 
     // absolute rect of the current ruler if this is {} then ruler_pos is used instead
     std::optional<AbsoluteRect> ruler_rect;
@@ -238,6 +240,7 @@ public:
     WindowPos virtual_to_window_pos(const VirtualPos& virtual_pos);
     NormalizedWindowRect virtual_to_normalized_window_rect(const VirtualRect& virtual_rect);
     void toggle_two_page();
+    void toggle_two_page_reading_direction();
     bool is_two_page_mode();
     void set_page_space_x(float space_x);
     void set_page_space_y(float space_y);
