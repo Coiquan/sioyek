@@ -1843,7 +1843,63 @@ void BaseSelectorWidget::on_config_file_changed() {
     }
 
     setStyleSheet(get_ui_stylesheet(true) + font_size_stylesheet);
-    get_view()->setStyleSheet(get_view_stylesheet_type_name() + "::item::selected{" + get_selected_stylesheet() + "}");
+    // Apply a flat scrollbar style while keeping the selected-item colors.
+    const QString scrollbar_style = R"QSS(
+        QScrollBar:vertical {
+            background: #2B2B2B;
+            width: 10px;
+            margin: 0px;
+            border: none;
+        }
+        QScrollBar::handle:vertical {
+            background: #72767B;
+            min-height: 28px;
+            border-radius: 4px;
+            margin: 1px 2px;
+        }
+        QScrollBar::handle:vertical:hover { background: #A3A7AC; }
+        QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {
+            height: 0px;
+            border: none;
+            background: transparent;
+        }
+        QScrollBar::up-arrow:vertical, QScrollBar::down-arrow:vertical {
+            width: 0px;
+            height: 0px;
+            background: transparent;
+        }
+        QScrollBar::add-page:vertical, QScrollBar::sub-page:vertical {
+            background: transparent;
+        }
+        QScrollBar:horizontal {
+            background: #2B2B2B;
+            height: 10px;
+            margin: 0px;
+            border: none;
+        }
+        QScrollBar::handle:horizontal {
+            background: #72767B;
+            min-width: 28px;
+            border-radius: 4px;
+            margin: 2px 1px;
+        }
+        QScrollBar::handle:horizontal:hover { background: #A3A7AC; }
+        QScrollBar::add-line:horizontal, QScrollBar::sub-line:horizontal {
+            width: 0px;
+            border: none;
+            background: transparent;
+        }
+        QScrollBar::left-arrow:horizontal, QScrollBar::right-arrow:horizontal {
+            width: 0px;
+            height: 0px;
+            background: transparent;
+        }
+        QScrollBar::add-page:horizontal, QScrollBar::sub-page:horizontal {
+            background: transparent;
+        }
+    )QSS";
+    get_view()->setStyleSheet(
+        get_view_stylesheet_type_name() + "::item::selected{" + get_selected_stylesheet() + "}" + scrollbar_style);
 }
 
 void BaseSelectorWidget::resizeEvent(QResizeEvent* resize_event) {
