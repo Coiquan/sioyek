@@ -1380,7 +1380,11 @@ void PdfViewOpenGLWidget::my_render(QPainter* painter) {
             }
             else {
                 if (last_opened_file_path.size() > 0) {
-                    draw_empty_helper_message(painter, "Document " + QString::fromStdWString(last_opened_file_path) + " does not exist");
+                    const QString path = QString::fromStdWString(last_opened_file_path);
+                    if (!QFile::exists(path)) {
+                        draw_empty_helper_message(painter, "Document " + path + " does not exist");
+                    }
+                    // The file exists but may still be loading. Draw nothing.
                 }
                 else {
                     draw_empty_helper_message(painter, "No document");
