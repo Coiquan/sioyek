@@ -1280,6 +1280,7 @@ MainWidget::MainWidget(fz_context* mupdf_context,
                     (doc->get_milies_since_last_edit_time() > RELOAD_INTERVAL_MILISECONDS)) {
 
                     if (is_doc_valid(this->mupdf_context, utf8_encode(doc->get_path()))) {
+                        pop_all_widgets();
                         doc->reload();
                         // update all the main_widgets that are using this document
                         for (auto window : windows) {
@@ -1837,7 +1838,7 @@ void MainWidget::validate_render() {
                     main_document_view->get_document()->get_accum_page_height(current_page) +
                     main_document_view->get_document()->get_page_height(current_page) / 2 + statusbar_factor);
             }
-            if (IGNORE_WHITESPACE_IN_PRESENTATION_MODE) {
+            if (IGNORE_WHITESPACE_IN_PRESENTATION_MODE && !main_document_view->is_two_page_mode()) {
                 main_document_view->fit_to_page_height(true);
             }
             else {
@@ -4070,6 +4071,14 @@ void MainWidget::push_current_widget(QWidget* new_widget) {
     current_widget_stack.push_back(new_widget);
 }
 
+void MainWidget::pop_all_widgets(){
+    while (!current_widget_stack.empty()) {
+        current_widget_stack.back()->hide();
+        current_widget_stack.back()->deleteLater();
+        current_widget_stack.pop_back();
+    }
+}
+
 void MainWidget::pop_current_widget(bool canceled) {
 
     if (current_widget_stack.size() > 0) {
@@ -5190,6 +5199,10 @@ void MainWidget::focus_rect(DocumentRect rect) {
 }
 
 void MainWidget::focus_text(int page, const std::wstring& text) {
+    if (page < 0 || page >= doc()->num_pages()) {
+        return;
+    }
+
     std::vector<std::wstring> line_texts;
     std::vector<AbsoluteRect> line_rects;
     line_rects = main_document_view->get_document()->get_page_lines(page, &line_texts);
@@ -6324,8 +6337,9 @@ void MainWidget::handle_goto_toc() {
             else {
 
                 std::vector<int> selected_index = main_document_view->get_current_chapter_recursive_index();
+                auto* cached_toc_model = main_document_view->get_document()->get_toc_model();
                 //if (!TOUCH_MODE) {
-                set_current_widget(new FilteredTreeSelect<int>(FUZZY_SEARCHING, main_document_view->get_document()->get_toc_model(),
+                set_current_widget(new FilteredTreeSelect<int>(FUZZY_SEARCHING, cached_toc_model,
                     [&](const std::vector<int>& indices) {
                         TocNode* toc_node = get_toc_node_from_indices(main_document_view->get_document()->get_toc(),
                         indices);
