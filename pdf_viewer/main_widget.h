@@ -186,6 +186,7 @@ public:
     PdfViewOpenGLWidget* helper_opengl_widget_ = nullptr;
     QScrollBar* scroll_bar = nullptr;
     QToolBar* desktop_draw_toolbar_ = nullptr;
+    bool desktop_draw_toolbar_suspended_for_textbar_ = false;
     QAction* desktop_scratchpad_action_ = nullptr;
     QAction* desktop_save_action_ = nullptr;
     QAction* desktop_load_action_ = nullptr;
@@ -1021,6 +1022,9 @@ public:
     void set_desktop_draw_toolbar_visible(bool visible);
     void create_desktop_draw_toolbar();
     void update_desktop_draw_toolbar();
+    void update_top_bar_geometry();
+    void hide_textbar_and_restore_draw_toolbar();
+    int get_top_bar_width() const;
     QPoint to_pdf_viewport_pos(QPoint window_pos) const;
     PaperDownloadFinishedAction get_default_paper_download_finish_action();
     QString get_paper_download_finish_action_string(PaperDownloadFinishedAction action);

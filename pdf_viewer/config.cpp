@@ -7,6 +7,11 @@
 
 int FONT_SIZE = -1;
 int STATUS_BAR_FONT_SIZE = -1;
+// Shared width for the Search/Comment prompt and the desktop drawing toolbar.
+float TOP_BAR_WIDTH_RATIO = 1.0f;
+// Exactly five brush sizes and six palette letters (a-z) are shown.
+std::wstring DRAW_TOOLBAR_SIZES = L"1 2 3 5 8";
+std::wstring DRAW_TOOLBAR_COLORS = L"a b f o r y";
 float BACKGROUND_COLOR[3] = { 0.97f, 0.97f, 0.97f };
 float DARK_MODE_BACKGROUND_COLOR[3] = { 0.0f, 0.0f, 0.0f };
 float CUSTOM_COLOR_MODE_EMPTY_BACKGROUND_COLOR[3] = { 0.0f, 0.0f, 0.0f };
@@ -939,6 +944,7 @@ ConfigManager::ConfigManager(const Path& default_path, const Path& auto_path, co
     add_float(L"vertical_move_amount", &VERTICAL_MOVE_AMOUNT, FloatExtras{0.1f, 10.0f});
     add_float(L"horizontal_move_amount", &HORIZONTAL_MOVE_AMOUNT, FloatExtras{0.1f, 10.0f});
     add_float(L"move_screen_percentage", &MOVE_SCREEN_PERCENTAGE, FloatExtras{0.0f, 1.0f});
+    add_float(L"top_bar_width_ratio", &TOP_BAR_WIDTH_RATIO, FloatExtras{0.3f, 1.0f});
     add_float(L"strike_line_width", &STRIKE_LINE_WIDTH, FloatExtras{0.0f, 10.0f});
     add_float(L"move_screen_ratio", &MOVE_SCREEN_PERCENTAGE, FloatExtras{0.0f, 1.0f});
     add_float(L"visual_mark_next_page_fraction", &VISUAL_MARK_NEXT_PAGE_FRACTION, FloatExtras{-2.0f, 2.0f});
@@ -1092,6 +1098,8 @@ ConfigManager::ConfigManager(const Path& default_path, const Path& auto_path, co
     add_string(L"default_open_file_path", &DEFAULT_OPEN_FILE_PATH);
     add_string(L"annotations_directory", &ANNOTATIONS_DIR_PATH);
     add_string(L"status_bar_format", &STATUS_BAR_FORMAT);
+    add_string(L"draw_toolbar_sizes", &DRAW_TOOLBAR_SIZES);
+    add_string(L"draw_toolbar_colors", &DRAW_TOOLBAR_COLORS);
     add_string(L"right_status_bar_format", &RIGHT_STATUS_BAR_FORMAT);
     add_string(L"epub_css", &EPUB_CSS);
     add_string(L"tag_font_face", &TAG_FONT_FACE);

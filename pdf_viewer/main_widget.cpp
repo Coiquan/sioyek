@@ -26,6 +26,9 @@
 #include <cctype>
 #include <cstdlib>
 #include <cmath>
+#include <algorithm>
+#include <array>
+#include <sstream>
 #include <qpainterpath.h>
 #include <qabstractitemmodel.h>
 #include <qapplication.h>
@@ -143,6 +146,9 @@ extern float SMALL_PIXMAP_SCALE;
 extern std::wstring EXECUTE_COMMANDS[26];
 extern float HIGHLIGHT_COLORS[26 * 3];
 extern int STATUS_BAR_FONT_SIZE;
+extern float TOP_BAR_WIDTH_RATIO;
+extern std::wstring DRAW_TOOLBAR_SIZES;
+extern std::wstring DRAW_TOOLBAR_COLORS;
 extern Path default_config_path;
 extern Path default_keys_path;
 extern std::vector<Path> user_config_paths;
@@ -506,13 +512,9 @@ void MainWidget::resizeEvent(QResizeEvent* resize_event) {
 
     int status_bar_height = get_status_bar_height();
 
-    if (text_command_line_edit_container != nullptr) {
-        text_command_line_edit_container->move(0, 0);
-        text_command_line_edit_container->resize(main_window_width,
-            (desktop_draw_toolbar_ && desktop_draw_toolbar_->isVisible())
-                ? std::max(status_bar_height, desktop_draw_toolbar_->sizeHint().height())
-                : status_bar_height);
-    }
+    // The Search/Comment prompt has its own height; the drawing row must
+    // never force it to become taller.
+    update_top_bar_geometry();
 
     if (status_label != nullptr) {
         status_label->move(0, main_window_height - status_bar_height);
@@ -1308,7 +1310,15 @@ MainWidget::MainWidget(fz_context* mupdf_context,
     layout->setSpacing(0);
     layout->setContentsMargins(0, 0, 0, 0);
     opengl_widget->setAttribute(Qt::WA_TransparentForMouseEvents);
-    layout->addWidget(desktop_draw_toolbar_);
+    // The outer row occupies the viewport width. Its toolbar does not:
+    // both this row and the Search/Comment prompt use top_bar_width_ratio.
+    auto* draw_toolbar_row = new QHBoxLayout;
+    draw_toolbar_row->setSpacing(0);
+    draw_toolbar_row->setContentsMargins(0, 0, 0, 0);
+    draw_toolbar_row->addStretch();
+    draw_toolbar_row->addWidget(desktop_draw_toolbar_);
+    draw_toolbar_row->addStretch();
+    layout->addLayout(draw_toolbar_row);
     layout->addLayout(hlayout);
 
 #ifdef SIOYEK_ANDROID
@@ -1908,6 +1918,7 @@ void MainWidget::move_document_screens(int num_screens) {
 void MainWidget::on_config_file_changed(ConfigManager* new_config) {
 
     update_desktop_draw_toolbar();
+    update_top_bar_geometry();
     status_label->setStyleSheet(get_status_stylesheet());
     status_label->setFont(QFont(get_status_font_face_name()));
     text_command_line_edit_container->setStyleSheet(get_status_stylesheet());
@@ -2372,7 +2383,7 @@ void MainWidget::key_event(bool released, QKeyEvent* kevent, bool is_auto_repeat
 
         if (kevent->key() == Qt::Key::Key_Return || kevent->key() == Qt::Key::Key_Enter) {
             if (text_command_line_edit_container->isVisible()) {
-                text_command_line_edit_container->hide();
+                hide_textbar_and_restore_draw_toolbar();
                 setFocus();
                 handle_pending_text_command(text_command_line_edit->text().toStdWString());
                 return;
@@ -3721,10 +3732,13 @@ void MainWidget::show_textbar(const std::wstring& command_name, const std::wstri
             text_command_line_edit->setText(init);
         }
         text_command_line_edit_label->setText(QString::fromStdWString(command_name));
+        // Hide the drawing row only for the duration of the text prompt.
+        // Restoring its visibility must not change the active drawing mode.
         if (desktop_draw_toolbar_ && desktop_draw_toolbar_->isVisible()) {
-            text_command_line_edit_container->resize(width(),
-                std::max(get_status_bar_height(), desktop_draw_toolbar_->sizeHint().height()));
+            desktop_draw_toolbar_suspended_for_textbar_ = true;
+            set_desktop_draw_toolbar_visible(false);
         }
+        update_top_bar_geometry();
         text_command_line_edit_container->show();
         text_command_line_edit_container->raise();
         text_command_line_edit->setFocus();
@@ -7288,7 +7302,7 @@ bool MainWidget::handle_quick_tap(WindowPos click_pos) {
     //    delete current_widget;
     //    current_widget = nullptr;
     //}
-    text_command_line_edit_container->hide();
+    hide_textbar_and_restore_draw_toolbar();
 
     last_quick_tap_position = mapFromGlobal(QCursor::pos());
     last_quick_tap_time = now;
@@ -10690,7 +10704,7 @@ DocumentView* MainWidget::helper_document_view(){
 
 void MainWidget::hide_command_line_edit(){
     text_command_line_edit->setText("");
-    text_command_line_edit_container->hide();
+    hide_textbar_and_restore_draw_toolbar();
     hide_command_hints();
     text_suggestion_index = 0;
     pending_command_instance = {};
@@ -11175,6 +11189,34 @@ void MainWidget::set_current_freehand_alpha(float alpha) {
     freehand_alpha = alpha;
 }
 
+int MainWidget::get_top_bar_width() const {
+    const int window_width = std::max(1, width());
+    const float ratio = std::clamp(TOP_BAR_WIDTH_RATIO, 0.3f, 1.0f);
+    return std::clamp(static_cast<int>(std::lround(window_width * ratio)), 1, window_width);
+}
+
+void MainWidget::update_top_bar_geometry() {
+    const int bar_width = get_top_bar_width();
+    const int x = (width() - bar_width) / 2;
+    if (text_command_line_edit_container) {
+        text_command_line_edit_container->setGeometry(
+            x, 0, bar_width, get_status_bar_height());
+    }
+    if (desktop_draw_toolbar_ && desktop_draw_toolbar_->width() != bar_width) {
+        desktop_draw_toolbar_->setFixedWidth(bar_width);
+    }
+}
+
+void MainWidget::hide_textbar_and_restore_draw_toolbar() {
+    text_command_line_edit_container->hide();
+    if (desktop_draw_toolbar_suspended_for_textbar_) {
+        desktop_draw_toolbar_suspended_for_textbar_ = false;
+        if (freehand_drawing_mode != DrawingMode::None) {
+            set_desktop_draw_toolbar_visible(true);
+        }
+    }
+}
+
 void MainWidget::show_draw_controls() {
     // Keep the legacy touch toolbar available, but never display it together
     // with the new desktop toolbar.
@@ -11194,7 +11236,7 @@ void MainWidget::create_desktop_draw_toolbar() {
     desktop_draw_toolbar_->setMovable(false);
     desktop_draw_toolbar_->setFloatable(false);
     desktop_draw_toolbar_->setToolButtonStyle(Qt::ToolButtonTextBesideIcon);
-    desktop_draw_toolbar_->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Fixed);
+    desktop_draw_toolbar_->setSizePolicy(QSizePolicy::Fixed, QSizePolicy::Fixed);
     desktop_draw_toolbar_->setIconSize(QSize(18, 18));
     desktop_draw_toolbar_->setMinimumWidth(0);
     desktop_draw_toolbar_->hide();
@@ -11237,14 +11279,13 @@ void MainWidget::create_desktop_draw_toolbar() {
     desktop_draw_toolbar_->addWidget(size_label);
     auto* sizes = new QActionGroup(desktop_draw_toolbar_);
     sizes->setExclusive(false);
-    for (float thickness : { 1.0f, 2.0f, 3.0f, 5.0f, 8.0f }) {
-        QAction* action = desktop_draw_toolbar_->addAction(QString::number(thickness));
+    for (int i = 0; i < 5; ++i) {
+        QAction* action = desktop_draw_toolbar_->addAction(QString());
         action->setCheckable(true);
-        action->setData(thickness);
         sizes->addAction(action);
         desktop_size_actions_.push_back(action);
-        connect(action, &QAction::triggered, this, [this, thickness]() {
-            set_freehand_thickness(thickness);
+        connect(action, &QAction::triggered, this, [this, action]() {
+            set_freehand_thickness(action->data().toFloat());
             if (freehand_drawing_mode == DrawingMode::None) {
                 mouse_drag_mode = false;
                 set_hand_drawing_mode(true);
@@ -11260,15 +11301,14 @@ void MainWidget::create_desktop_draw_toolbar() {
     desktop_draw_toolbar_->addWidget(color_label);
     auto* colors = new QActionGroup(desktop_draw_toolbar_);
     colors->setExclusive(false);
-    // Presets are indices into Sioyek's configurable 26-color palette.
-    for (char symbol : { 'a', 'b', 'f', 'o', 'r', 'y' }) {
-        QAction* action = desktop_draw_toolbar_->addAction(QString(QChar::fromLatin1(symbol)).toUpper());
+    // Exactly six color slots; config supplies palette indices, not slot count.
+    for (int i = 0; i < 6; ++i) {
+        QAction* action = desktop_draw_toolbar_->addAction(QString());
         action->setCheckable(true);
-        action->setData(QChar(symbol));
         colors->addAction(action);
         desktop_color_actions_.push_back(action);
-        connect(action, &QAction::triggered, this, [this, symbol]() {
-            current_freehand_type = symbol;
+        connect(action, &QAction::triggered, this, [this, action]() {
+            current_freehand_type = action->data().toChar().toLatin1();
             if (freehand_drawing_mode == DrawingMode::None) {
                 mouse_drag_mode = false;
                 set_hand_drawing_mode(true);
@@ -11286,16 +11326,6 @@ void MainWidget::create_desktop_draw_toolbar() {
         invalidate_render();
     });
 
-    // Explicit close is kept at the right edge. The show_draw_controls command
-    // itself also toggles the row, so no additional shortcut is required.
-    auto* spacer = new QWidget(desktop_draw_toolbar_);
-    spacer->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Preferred);
-    desktop_draw_toolbar_->addWidget(spacer);
-    auto* close_action = desktop_draw_toolbar_->addAction(tr("Close"));
-    connect(close_action, &QAction::triggered, this, [this]() {
-        show_desktop_draw_controls();
-    });
-
     update_desktop_draw_toolbar();
 }
 
@@ -11308,11 +11338,50 @@ void MainWidget::update_desktop_draw_toolbar() {
     desktop_save_action_->setEnabled(doc() != nullptr);
     desktop_load_action_->setEnabled(doc() != nullptr);
 
-    for (auto* action : desktop_size_actions_) {
-        action->setChecked(std::abs(action->data().toFloat() - freehand_thickness) < 0.01f);
+    // A malformed preset list falls back to its built-in five/six entries.
+    std::array<float, 5> sizes{{ 1, 2, 3, 5, 8 }};
+    {
+        std::wistringstream ss(DRAW_TOOLBAR_SIZES);
+        std::array<float, 5> parsed{};
+        bool valid = true;
+        for (auto& value : parsed) {
+            if (!(ss >> value) || !std::isfinite(value) || value <= 0 || value > 100)
+                valid = false;
+        }
+        std::wstring extra;
+        if (ss >> extra) valid = false;
+        if (valid) sizes = parsed;
     }
-    for (auto* action : desktop_color_actions_) {
-        const char type = action->data().toChar().toLatin1();
+    for (size_t i = 0; i < desktop_size_actions_.size(); ++i) {
+        QAction* action = desktop_size_actions_[i];
+        const float size = sizes[i];
+        action->setData(size);
+        action->setText(QString::number(size));
+        action->setChecked(std::abs(size - freehand_thickness) < 0.01f);
+    }
+
+    std::array<char, 6> color_symbols{{ 'a', 'b', 'f', 'o', 'r', 'y' }};
+    {
+        // Both "abfory" and "a b f o r y" are accepted.
+        std::array<char, 6> parsed{};
+        size_t count = 0;
+        bool valid = true;
+        for (wchar_t ch : DRAW_TOOLBAR_COLORS) {
+            if (ch == L' ' || ch == L'\t') continue;
+            if (ch < L'a' || ch > L'z' || count >= parsed.size()) {
+                valid = false;
+                break;
+            }
+            parsed[count++] = static_cast<char>(ch);
+        }
+        if (valid && count == parsed.size()) color_symbols = parsed;
+    }
+    for (size_t i = 0; i < desktop_color_actions_.size(); ++i) {
+        QAction* action = desktop_color_actions_[i];
+        const char type = color_symbols[i];
+        action->setData(QChar::fromLatin1(type));
+        action->setText(QString()); // Show the swatch only, never its letter.
+        action->setToolTip(tr("Drawing color %1").arg(QChar::fromLatin1(type).toUpper()));
         action->setChecked(current_freehand_type == type);
         const int index = type - 'a';
         const float* rgb = &HIGHLIGHT_COLORS[3 * index];
@@ -11335,7 +11404,12 @@ void MainWidget::update_desktop_draw_toolbar() {
 }
 
 void MainWidget::set_desktop_draw_toolbar_visible(bool visible) {
-    if (!desktop_draw_toolbar_ || desktop_draw_toolbar_->isVisible() == visible) return;
+    if (!desktop_draw_toolbar_) return;
+    if (visible && text_command_line_edit_container && text_command_line_edit_container->isVisible()) {
+        desktop_draw_toolbar_suspended_for_textbar_ = true;
+        return;
+    }
+    if (desktop_draw_toolbar_->isVisible() == visible) return;
     if (visible) {
         if (!main_document_view_has_document()) return;
         // Never display both native and legacy QML drawing interfaces.
@@ -11349,9 +11423,8 @@ void MainWidget::set_desktop_draw_toolbar_visible(bool visible) {
     if (visible) {
         update_desktop_draw_toolbar();
     }
-    else if (text_command_line_edit_container->isVisible()) {
-        text_command_line_edit_container->resize(width(), get_status_bar_height());
-    }
+    // No Search/Comment resize here: drawing mode changes only the PDF row.
+    update_top_bar_geometry();
     // Changing the toolbar height changes the PDF viewport and its coordinates.
     central_widget->layout()->activate();
     main_document_view->on_view_size_change(opengl_widget->width(), opengl_widget->height());
