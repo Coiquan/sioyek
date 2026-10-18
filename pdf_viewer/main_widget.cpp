@@ -11250,6 +11250,8 @@ void MainWidget::show_draw_controls() {
 void MainWidget::create_desktop_draw_toolbar() {
     desktop_draw_toolbar_ = new QToolBar(central_widget);
     desktop_draw_toolbar_->setObjectName("desktopDrawControls");
+    // Unhandled clicks on labels/empty space must not reach PDF selection.
+    desktop_draw_toolbar_->setAttribute(Qt::WA_NoMousePropagation);
     desktop_draw_toolbar_->setMovable(false);
     desktop_draw_toolbar_->setFloatable(false);
     desktop_draw_toolbar_->setToolButtonStyle(Qt::ToolButtonTextOnly);

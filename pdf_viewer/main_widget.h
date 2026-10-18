@@ -285,7 +285,7 @@ public:
     char select_highlight_type = 'a';
 
     // color type to use when freehand drawing
-    char current_freehand_type = 'e';
+    char current_freehand_type = 'a';
 
     // alpha of freehand drawings
     float freehand_alpha = 1.0f;
