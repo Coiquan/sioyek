@@ -224,6 +224,7 @@ extern bool RESTORE_ALL_WINDOWS_ON_STARTUP;
 extern bool FREE_TOUCHPAD_MOVEMENT;
 extern bool SIMPLIFY_FREEHAND_DRAWINGS;
 extern bool SHOW_RIGHT_CLICK_CONTEXT_MENU;
+extern bool RIGHT_CLICK_MODE_MENU;
 extern std::wstring CONTEXT_MENU_ITEMS;
 extern std::wstring CONTEXT_MENU_ITEMS_FOR_SELECTED_TEXT;
 extern std::wstring CONTEXT_MENU_ITEMS_FOR_LINKS;
@@ -604,8 +605,11 @@ void MainWidget::mouseMoveEvent(QMouseEvent* mouse_event) {
     }
 
     if (is_rotated()) {
-        // we don't handle mouse events while document is rotated becausae proper handling
-        // would increase the code complexity too much to be worth it
+        // Rendering rotates the texture, not the viewport axes. Screen-space
+        // panning remains valid; hit testing and text selection do not.
+        if (mouse_drag_mode && should_drag()) {
+            pan_document_from_mouse_pos(WindowPos(mouse_event->pos()));
+        }
         return;
     }
 
@@ -793,27 +797,7 @@ void MainWidget::mouseMoveEvent(QMouseEvent* mouse_event) {
     }
 
     if (should_drag()) {
-        fvec2 diff_doc = (mpos - last_mouse_down_window_pos) / dv()->get_zoom_level();
-        diff_doc[1] = -diff_doc[1]; // higher document y positions correspond to lower window positions
-
-        if (horizontal_scroll_locked) {
-            diff_doc.values[0] = 0;
-        }
-        if (!ALLOW_HORIZONTAL_DRAG_WHEN_DOCUMENT_IS_SMALL) {
-            float current_page_width = doc()->get_page_width(get_current_page_number());
-
-            if (dv()->is_two_page_mode()) {
-                current_page_width += current_page_width + PAGE_SPACE_X;
-            }
-
-            if ((current_page_width > 0) && ((dv()->get_zoom_level() * current_page_width) < width())) {
-                diff_doc.values[0] = 0;
-            }
-        }
-        //dv()->set_pos(last_mouse_down_document_offset + diff_doc);
-        dv()->set_virtual_pos(last_mouse_down_document_virtual_offset + diff_doc);
-
-        validate_render();
+        pan_document_from_mouse_pos(mpos);
     }
 
     if (is_selecting) {
@@ -1927,6 +1911,60 @@ void MainWidget::on_config_file_changed(ConfigManager* new_config) {
     //text_command_line_edit_container->setStyleSheet("background-color: black; color: white; border: none;");
 }
 
+void MainWidget::pan_document_from_mouse_pos(WindowPos mpos) {
+    if (!main_document_view_has_document()) return;
+    fvec2 diff_doc = (mpos - last_mouse_down_window_pos) / dv()->get_zoom_level();
+    diff_doc[1] = -diff_doc[1];
+
+    if (horizontal_scroll_locked) {
+        diff_doc.values[0] = 0;
+    }
+    // Rotated pages use screen-space panning; the unrotated page-width
+    // restriction must not block horizontal dragging after rotation.
+    if (!is_rotated() && !ALLOW_HORIZONTAL_DRAG_WHEN_DOCUMENT_IS_SMALL) {
+        float current_page_width = doc()->get_page_width(get_current_page_number());
+        if (dv()->is_two_page_mode()) {
+            current_page_width += current_page_width + PAGE_SPACE_X;
+        }
+        if ((current_page_width > 0) &&
+            (dv()->get_zoom_level() * current_page_width < width())) {
+            diff_doc.values[0] = 0;
+        }
+    }
+    dv()->set_virtual_pos(last_mouse_down_document_virtual_offset + diff_doc);
+    validate_render();
+}
+
+void MainWidget::show_interaction_mode_menu() {
+    QMenu menu(this);
+    QAction* select_action = menu.addAction(tr("Select text"));
+    QAction* drag_action = menu.addAction(tr("Drag page"));
+    QAction* draw_action = menu.addAction(tr("Draw with mouse"));
+    QAction* pen_action = menu.addAction(tr("Draw with pen"));
+    for (QAction* a : {select_action, drag_action, draw_action, pen_action}) {
+        a->setCheckable(true);
+    }
+    select_action->setChecked(!mouse_drag_mode && freehand_drawing_mode == DrawingMode::None);
+    drag_action->setChecked(mouse_drag_mode && freehand_drawing_mode == DrawingMode::None);
+    draw_action->setChecked(freehand_drawing_mode == DrawingMode::Drawing);
+    pen_action->setChecked(freehand_drawing_mode == DrawingMode::PenDrawing);
+
+    QAction* action = menu.exec(QCursor::pos());
+    if (!action) return;
+    if (action == select_action || action == drag_action) {
+        set_hand_drawing_mode(false);
+        mouse_drag_mode = action == drag_action;
+    }
+    else if (action == draw_action || action == pen_action) {
+        mouse_drag_mode = false;
+        if (action == draw_action) set_hand_drawing_mode(true);
+        else set_pen_drawing_mode(true);
+    }
+    is_dragging = false;
+    is_selecting = false;
+    invalidate_render();
+}
+
 void MainWidget::toggle_mouse_drag_mode() {
     this->mouse_drag_mode = !this->mouse_drag_mode;
 }
@@ -2460,7 +2498,17 @@ void MainWidget::handle_right_click(WindowPos click_pos, bool down, bool is_shif
         return;
     }
 
+    if (interaction_menu_consumed_right_click && !down) {
+        interaction_menu_consumed_right_click = false;
+        return;
+    }
     if (SHOW_RIGHT_CLICK_CONTEXT_MENU && down && show_contextual_context_menu()) {
+        interaction_menu_consumed_right_click = true;
+        return;
+    }
+    if (RIGHT_CLICK_MODE_MENU && down && RIGHT_CLICK_COMMAND.empty() && !synctex_mode) {
+        interaction_menu_consumed_right_click = true;
+        show_interaction_mode_menu();
         return;
     }
     if (RIGHT_CLICK_COMMAND.size() > 0) {
@@ -3136,6 +3184,10 @@ void MainWidget::mouseReleaseEvent(QMouseEvent* mevent) {
     }
 
     if (is_rotated()) {
+        if (mevent->button() == Qt::LeftButton && mouse_drag_mode) {
+            is_dragging = false;
+            validate_render();
+        }
         return;
     }
 
@@ -3292,6 +3344,16 @@ void MainWidget::mousePressEvent(QMouseEvent* mevent) {
 
     if (should_draw(false) && (mevent->button() == Qt::MouseButton::LeftButton)) {
         start_drawing();
+        return;
+    }
+
+    if (is_rotated() && mouse_drag_mode && mevent->button() == Qt::LeftButton
+        && !is_shift_pressed && !is_control_pressed && !is_command_pressed && !is_alt_pressed) {
+        if (main_document_view_has_document()) {
+            last_mouse_down_window_pos = WindowPos(mevent->pos());
+            last_mouse_down_document_virtual_offset = dv()->get_virtual_offset();
+            is_dragging = true;
+        }
         return;
     }
 

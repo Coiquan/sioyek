@@ -323,6 +323,8 @@ public:
     // In mouse drag mode, we use the mouse to drag the document around
     bool mouse_drag_mode = false;
 
+    bool interaction_menu_consumed_right_click = false;
+
     // In synctex mode right clicking on a document will jump to the corresponding latex file
     // (assuming `inverse_search_command` is properly configured)
     bool synctex_mode = false;
@@ -570,6 +572,8 @@ public:
     AbsoluteRect move_visual_mark(int offset);
     void on_config_file_changed(ConfigManager* new_config);
     void toggle_mouse_drag_mode();
+    void pan_document_from_mouse_pos(WindowPos position);
+    void show_interaction_mode_menu();
     void toggle_freehand_drawing_mode();
     void exit_freehand_drawing_mode();
     void toggle_pen_drawing_mode();
