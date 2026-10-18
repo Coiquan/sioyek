@@ -1935,9 +1935,14 @@ void MainWidget::pan_document_from_mouse_pos(WindowPos mpos) {
     if (horizontal_scroll_locked) {
         diff_doc.values[0] = 0;
     }
-    // Rotated pages use screen-space panning; the unrotated page-width
-    // restriction must not block horizontal dragging after rotation.
-    if (!is_rotated() && !ALLOW_HORIZONTAL_DRAG_WHEN_DOCUMENT_IS_SMALL) {
+    // Keep rotated pages in a vertical-only reading/dragging mode by default.
+    // The existing opt-in also permits horizontal dragging after rotation.
+    if (is_rotated()) {
+        if (!ALLOW_HORIZONTAL_DRAG_WHEN_DOCUMENT_IS_SMALL) {
+            diff_doc.values[0] = 0;
+        }
+    }
+    else if (!ALLOW_HORIZONTAL_DRAG_WHEN_DOCUMENT_IS_SMALL) {
         float current_page_width = doc()->get_page_width(get_current_page_number());
         if (dv()->is_two_page_mode()) {
             current_page_width += current_page_width + PAGE_SPACE_X;
@@ -5644,9 +5649,15 @@ void MainWidget::set_rect_select_mode(bool mode) {
     }
     if (draw_controls_) {
         if (mode) {
-            draw_controls_->hide();
+            // Only restore the toolbar if the selection itself hid it.
+            // ESC calls set_rect_select_mode(false) even when no selection ran.
+            if (draw_controls_->isVisible()) {
+                restore_draw_controls_after_rect_selection = true;
+                draw_controls_->hide();
+            }
         }
-        else {
+        else if (restore_draw_controls_after_rect_selection) {
+            restore_draw_controls_after_rect_selection = false;
             draw_controls_->show();
         }
     }
@@ -8637,6 +8648,8 @@ void MainWidget::handle_drawing_ui_visibilty() {
     }
 
     if (freehand_drawing_mode == DrawingMode::None) {
+        // Explicitly closing/exiting drawing must cancel any pending restore.
+        restore_draw_controls_after_rect_selection = false;
         get_draw_controls()->hide();
     }
     else {

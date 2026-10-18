@@ -820,6 +820,7 @@ public:
 protected:
     TouchTextSelectionButtons* text_selection_buttons_ = nullptr;
     DrawControlsUI* draw_controls_ = nullptr;
+    bool restore_draw_controls_after_rect_selection = false;
     SearchButtons* search_buttons_ = nullptr;
     HighlightButtons* highlight_buttons_ = nullptr;
     bool middle_click_hold_command_already_executed = false;
