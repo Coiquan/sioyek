@@ -22,8 +22,6 @@ else{
 
 
 CONFIG += c++20
-SOURCES += pdf_viewer/pen_input.cpp
-HEADERS += pdf_viewer/pen_input.h
 DEFINES += QT_3DINPUT_LIB QT_OPENGL_LIB QT_OPENGLEXTENSIONS_LIB QT_WIDGETS_LIB
 
 RESOURCES += resources.qrc
@@ -173,7 +171,7 @@ win32{
 
     # LIBS += -llibmupdf -Lzlib -lzlib
     #LIBS += -Llibs -llibmupdf
-    LIBS += opengl32.lib hid.lib user32.lib
+    LIBS += opengl32.lib
 }
 
 unix:!mac:!android {

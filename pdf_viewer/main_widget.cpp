@@ -1379,12 +1379,10 @@ MainWidget::MainWidget(fz_context* mupdf_context,
     set_color_mode_to_system_theme();
 #endif
 
-    initialize_windows_pen_input();
     setFocus();
 }
 
 MainWidget::~MainWidget() {
-    finish_tablet_tool();
     if (is_reading) {
         is_reading = false;
         get_tts()->stop();
@@ -1636,8 +1634,6 @@ std::wstring MainWidget::get_status_string(bool is_right) {
 }
 
 void MainWidget::handle_escape() {
-
-    finish_tablet_tool();
 
     // add high escape priority to overview and search, if any of them are escaped, do not escape any further
     if (opengl_widget) {
@@ -6925,23 +6921,6 @@ int MainWidget::num_visible_links() {
 
 bool MainWidget::event(QEvent* event) {
 
-    if (event->type() == PenInputEvent::event_type()) {
-        auto* pen = static_cast<PenInputEvent*>(event);
-        if (!opengl_widget) return true;
-        raw_pen_state_ = pen->state.in_range ? std::optional<PenInputState>(pen->state) : std::nullopt;
-        const bool in_viewport = opengl_widget->rect().contains(
-            opengl_widget->mapFromGlobal(pen->global_pos));
-        if (in_viewport || is_drawing || tablet_pen_tool_ != TabletPenTool::None) {
-            const bool handled = update_tablet_tool(pen->state, pen->global_pos);
-            if (is_drawing && !pen->state.tip_down) {
-                finish_drawing(opengl_widget->mapFromGlobal(pen->global_pos));
-                invalidate_render();
-            }
-            pen->setAccepted(handled);
-        }
-        return true;
-    }
-
     QTabletEvent* te = dynamic_cast<QTabletEvent*>(event);
     QKeyEvent* ke = dynamic_cast<QKeyEvent*>(event);
     if (ke && (ke->type() == QEvent::KeyPress)) {
@@ -6958,19 +6937,6 @@ bool MainWidget::event(QEvent* event) {
     if (event->type() == QEvent::WindowActivate) {
         if (is_scratchpad_mode()) {
             scratchpad->on_view_size_change(opengl_widget->width(), opengl_widget->height());
-        }
-    }
-    if (event->type() == QEvent::WindowDeactivate) {
-        finish_tablet_tool();
-        raw_pen_state_ = {};
-    }
-    if (te && opengl_widget) {
-        const bool in_viewport = opengl_widget->rect().contains(
-            opengl_widget->mapFromGlobal(te->globalPos()));
-        if ((in_viewport || is_drawing || tablet_pen_tool_ != TabletPenTool::None) &&
-            handle_tablet_tool_event(te)) {
-            event->accept();
-            return true;
         }
     }
     // Ignored tablet events let Qt synthesize mouse input for toolbars and
@@ -8504,13 +8470,11 @@ void MainWidget::set_freehand_thickness(float val) {
 
 void MainWidget::handle_pen_drawing_event(QTabletEvent* te) {
 
-    if (te->type() == QEvent::TabletPress && te->button() == Qt::LeftButton) {
-        if (raw_pen_state_ && !raw_pen_state_->tip_down) return;
+    if (te->type() == QEvent::TabletPress) {
         start_drawing();
-        handle_drawing_move(to_pdf_viewport_pos(te->pos()), te->pressure());
     }
 
-    if (te->type() == QEvent::TabletRelease && te->button() == Qt::LeftButton && is_drawing) {
+    if (te->type() == QEvent::TabletRelease) {
         finish_drawing(to_pdf_viewport_pos(te->pos()));
         invalidate_render();
     }
@@ -8522,103 +8486,6 @@ void MainWidget::handle_pen_drawing_event(QTabletEvent* te) {
         }
 
     }
-}
-
-void MainWidget::finish_tablet_tool() {
-    if (tablet_pen_tool_ == TabletPenTool::None) return;
-    // Moving strokes are removed from their source when the drag begins.
-    // Commit at the last pen position even if the side button is released first.
-    if (freehand_drawing_move_data) {
-        handle_freehand_drawing_move_finish(tablet_pen_last_pos_);
-    }
-    selected_freehand_drawings = {};
-    opengl_widget->moving_drawings.clear();
-    opengl_widget->moving_pixmaps.clear();
-    opengl_widget->clear_selected_rectangle();
-    tablet_pen_rect_begin_ = {};
-    tablet_pen_tip_down_ = false;
-    tablet_pen_tool_ = TabletPenTool::None;
-    invalidate_render();
-}
-
-bool MainWidget::handle_tablet_tool_event(QTabletEvent* te) {
-    PenInputState state;
-    if (raw_pen_state_) {
-        state = *raw_pen_state_;
-    }
-    else {
-        state.lower_down = te->buttons().testFlag(Qt::RightButton);
-#ifdef SIOYEK_QT6
-        state.upper_down = te->pointerType() == QPointingDevice::PointerType::Eraser;
-#else
-        state.upper_down = te->pointerType() == QTabletEvent::Eraser;
-#endif
-        // Fallback for devices/platforms without Raw Input. Tool identity
-        // comes from Qt buttons/pointer type; pressure only indicates contact.
-        state.tip_down = te->pressure() > 0.0;
-    }
-    return update_tablet_tool(state, te->globalPos());
-}
-
-bool MainWidget::update_tablet_tool(const PenInputState& state, QPoint global_pos) {
-    if (!main_document_view_has_document()) return false;
-    const TabletPenTool tool = !state.in_range ? TabletPenTool::None :
-        state.upper_down ? TabletPenTool::Erase :
-        state.lower_down ? TabletPenTool::Move : TabletPenTool::None;
-    if (tool == TabletPenTool::None && tablet_pen_tool_ == TabletPenTool::None) return false;
-
-    const QPoint pos = opengl_widget->mapFromGlobal(global_pos);
-    const AbsoluteDocumentPos abs_pos = get_window_abspos(WindowPos(pos));
-    if (tablet_pen_tool_ != TabletPenTool::None) tablet_pen_last_pos_ = abs_pos;
-    if (tool != tablet_pen_tool_) {
-        const bool was_active = tablet_pen_tool_ != TabletPenTool::None;
-        finish_tablet_tool();
-        if (tool == TabletPenTool::None) return was_active;
-        // Leave other commands and reading interactions alone. These tools
-        // temporarily override drawing, without changing the drawing mode.
-        if (!should_draw(true) || pending_command_instance || is_menu_focused()) return false;
-        if (is_drawing) {
-            finish_drawing(pos);
-        }
-        tablet_pen_tool_ = tool;
-        tablet_pen_last_pos_ = abs_pos;
-    }
-    if (tablet_pen_tool_ == TabletPenTool::None) return false;
-
-    const bool tip_down = state.tip_down;
-    if (tip_down && !tablet_pen_tip_down_) {
-        if (tool == TabletPenTool::Move && selected_freehand_drawings &&
-            selected_freehand_drawings->selection_absrect.contains(abs_pos)) {
-            handle_freehand_drawing_selection_click(abs_pos);
-        }
-        else {
-            selected_freehand_drawings = {};
-            opengl_widget->moving_drawings.clear();
-            opengl_widget->moving_pixmaps.clear();
-            tablet_pen_rect_begin_ = abs_pos;
-        }
-    }
-
-    if (freehand_drawing_move_data) {
-        opengl_widget->moving_drawings.clear();
-        opengl_widget->moving_pixmaps.clear();
-        move_selected_drawings(abs_pos, opengl_widget->moving_drawings, opengl_widget->moving_pixmaps);
-        if (!tip_down) handle_freehand_drawing_move_finish(abs_pos);
-    }
-    else if (tablet_pen_rect_begin_) {
-        AbsoluteRect rect(tablet_pen_rect_begin_.value(), abs_pos);
-        if (rect.x0 > rect.x1) std::swap(rect.x0, rect.x1);
-        if (rect.y0 > rect.y1) std::swap(rect.y0, rect.y1);
-        opengl_widget->set_selected_rectangle(rect);
-        if (!tip_down) {
-            if (tool == TabletPenTool::Move) select_freehand_drawings(rect);
-            else delete_freehand_drawings(rect);
-            tablet_pen_rect_begin_ = {};
-        }
-    }
-    tablet_pen_tip_down_ = tip_down;
-    invalidate_render();
-    return true;
 }
 
 void MainWidget::handle_drawing_move(QPoint pos, float pressure) {
@@ -9386,10 +9253,6 @@ void MainWidget::handle_freehand_drawing_move_finish() {
     QPoint p = to_pdf_viewport_pos(mapFromGlobal(QCursor::pos()));
     //AbsoluteDocumentPos mpos_absolute = main_document_view->window_to_absolute_document_pos({ p.x(), p.y() });
     AbsoluteDocumentPos mpos_absolute = get_window_abspos({ p.x(), p.y() });
-    handle_freehand_drawing_move_finish(mpos_absolute);
-}
-
-void MainWidget::handle_freehand_drawing_move_finish(AbsoluteDocumentPos mpos_absolute) {
     std::vector<FreehandDrawing> moved_drawings;
     std::vector<PixmapDrawing> moved_pixmaps;
 
@@ -11148,7 +11011,6 @@ DocumentView* MainWidget::dv() {
 
 bool MainWidget::should_draw(bool originated_from_pen) {
 
-    if (tablet_pen_tool_ != TabletPenTool::None) return false;
     if (rect_select_mode) return false;
     if (freehand_drawing_move_data || selected_freehand_drawings) return false;
 

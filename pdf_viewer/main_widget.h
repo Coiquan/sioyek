@@ -18,7 +18,6 @@
 #include "book.h"
 #include "input.h"
 #include "path.h"
-#include "pen_input.h"
 
 extern float VERTICAL_MOVE_AMOUNT;
 extern float HORIZONTAL_MOVE_AMOUNT;
@@ -62,12 +61,6 @@ enum class DrawingMode {
     Drawing,
     PenDrawing,
     None
-};
-
-enum class TabletPenTool {
-    None,
-    Move,
-    Erase
 };
 
 enum class SelectionMode {
@@ -194,11 +187,6 @@ public:
     QScrollBar* scroll_bar = nullptr;
     QToolBar* desktop_draw_toolbar_ = nullptr;
     bool desktop_draw_toolbar_suspended_for_textbar_ = false;
-    TabletPenTool tablet_pen_tool_ = TabletPenTool::None;
-    std::optional<PenInputState> raw_pen_state_;
-    bool tablet_pen_tip_down_ = false;
-    std::optional<AbsoluteDocumentPos> tablet_pen_rect_begin_;
-    AbsoluteDocumentPos tablet_pen_last_pos_;
     QAction* desktop_scratchpad_action_ = nullptr;
     QAction* desktop_save_action_ = nullptr;
     QAction* desktop_load_action_ = nullptr;
@@ -804,9 +792,6 @@ public:
     void start_drawing();
     void finish_drawing(QPoint pos);
     void handle_pen_drawing_event(QTabletEvent* te);
-    bool handle_tablet_tool_event(QTabletEvent* te);
-    bool update_tablet_tool(const PenInputState& state, QPoint global_pos);
-    void finish_tablet_tool();
     void select_freehand_drawings(AbsoluteRect rect);
     void delete_freehand_drawings(AbsoluteRect rect);
     void handle_move_text_mark_forward(bool word);
@@ -886,7 +871,6 @@ public:
     void begin_portal_move(int index, AbsoluteDocumentPos begin_cursor_pos, bool is_pending);
     bool should_drag();
     void handle_freehand_drawing_move_finish();
-    void handle_freehand_drawing_move_finish(AbsoluteDocumentPos pos);
     void move_selected_drawings(AbsoluteDocumentPos new_pos, std::vector<FreehandDrawing>& moved_drawings, std::vector<PixmapDrawing>& moved_pixmaps);
     bool goto_ith_next_overview(int i);
     void on_overview_source_updated();
