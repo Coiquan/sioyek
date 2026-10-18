@@ -7,6 +7,7 @@
 #include <qfile.h>
 
 #include "pdf_view_opengl_widget.h"
+#include "stroke_mesh.h"
 #include "path.h"
 #include "book.h"
 #include "document.h"
@@ -2931,6 +2932,9 @@ FreehandDrawing smoothen_drawing(FreehandDrawing original) {
         /*     smoothed_drawing.points.push_back(FreehandDrawingPoint{ AbsoluteDocumentPos{ p.x(), p.y() }, original.points[i].thickness}); */
         /* } */
     }
+    // The Hermite interpolation loop emits points in [0, 1), so retain the
+    // actual final sample (including its thickness) for the end cap.
+    smoothed_drawing.points.push_back(original.points.back());
     return smoothed_drawing;
 
 }
@@ -3018,63 +3022,27 @@ void PdfViewOpenGLWidget::compile_drawings(DocumentView* dv, const std::vector<F
 
         }
 
-        float first_line_x = (drawing.points[1].pos.x - drawing.points[0].pos.x) * width();
-        float first_line_y = (drawing.points[1].pos.y - drawing.points[0].pos.y) * height();
-        float first_line_size = sqrt(first_line_x * first_line_x + first_line_y * first_line_y);
-        first_line_x = first_line_x / first_line_size;
-        first_line_y = first_line_y / first_line_size;
-
-        float first_ortho_x = -first_line_y * thickness_x * drawing.points[0].thickness;
-        float first_ortho_y = first_line_x * thickness_y * drawing.points[0].thickness;
-
-
-        coordinates.push_back(drawing.points[0].pos.x - first_ortho_x);
-        coordinates.push_back(drawing.points[0].pos.y - first_ortho_y);
-        type_indices.push_back(drawing.type - 'a');
-        indices.push_back(index++);
-        coordinates.push_back(drawing.points[0].pos.x + first_ortho_x);
-        coordinates.push_back(drawing.points[0].pos.y + first_ortho_y);
-        type_indices.push_back(drawing.type - 'a');
-        indices.push_back(index++);
-
-        float prev_line_x = first_line_x;
-        float prev_line_y = first_line_y;
-
-        add_point_coords(drawing.points[0], drawing.type - 'a');
+        // Use the same one-cross-section-per-sample mesh as the live PDF
+        // drawing path. The previous loop repeated every segment's endpoints
+        // in one GL_TRIANGLE_STRIP and could produce folded triangles.
+        std::vector<sioyek_stroke_mesh::Point> stroke_points;
+        stroke_points.reserve(drawing.points.size());
+        for (const auto& p : drawing.points) {
+            stroke_points.push_back({p.pos.x, p.pos.y, p.thickness});
+        }
+        const auto stroke_vertices = sioyek_stroke_mesh::make_strip(
+            stroke_points, 1.0f, 1.0f, 0.5f, 0.5f);
+        if (stroke_vertices.empty()) {
+            add_point_coords(drawing.points.front(), drawing.type - 'a');
+            continue;
+        }
+        add_point_coords(drawing.points.front(), drawing.type - 'a');
         add_point_coords(drawing.points.back(), drawing.type - 'a');
-        for (int line_index = 0; line_index < drawing.points.size() - 1; line_index++) {
-            float line_direction_x = (drawing.points[line_index + 1].pos.x - drawing.points[line_index].pos.x);
-            float line_direction_y = (drawing.points[line_index + 1].pos.y - drawing.points[line_index].pos.y);
-            float line_size = sqrt(line_direction_x * line_direction_x + line_direction_y * line_direction_y);
-            line_direction_x = line_direction_x / line_size;
-            line_direction_y = line_direction_y / line_size;
-
-            float ortho_x1 = -line_direction_y * thickness_x * drawing.points[line_index].thickness;
-            float ortho_y1 = line_direction_x * thickness_y * drawing.points[line_index].thickness;
-
-            float ortho_x2 = -line_direction_y * thickness_x * drawing.points[line_index + 1].thickness;
-            float ortho_y2 = line_direction_x * thickness_y * drawing.points[line_index + 1].thickness;
-
-            coordinates.push_back(drawing.points[line_index].pos.x - ortho_x1);
-            coordinates.push_back(drawing.points[line_index].pos.y - ortho_y1);
+        for (size_t k = 0; k < stroke_vertices.size(); k += 2) {
+            coordinates.push_back(stroke_vertices[k]);
+            coordinates.push_back(stroke_vertices[k + 1]);
             type_indices.push_back(drawing.type - 'a');
             indices.push_back(index++);
-
-            coordinates.push_back(drawing.points[line_index].pos.x + ortho_x1);
-            coordinates.push_back(drawing.points[line_index].pos.y + ortho_y1);
-            type_indices.push_back(drawing.type - 'a');
-            indices.push_back(index++);
-
-            coordinates.push_back(drawing.points[line_index + 1].pos.x - ortho_x1);
-            coordinates.push_back(drawing.points[line_index + 1].pos.y - ortho_y1);
-            type_indices.push_back(drawing.type - 'a');
-            indices.push_back(index++);
-
-            coordinates.push_back(drawing.points[line_index + 1].pos.x + ortho_x2);
-            coordinates.push_back(drawing.points[line_index + 1].pos.y + ortho_y2);
-            type_indices.push_back(drawing.type - 'a');
-            indices.push_back(index++);
-
         }
         indices.push_back(primitive_restart_index);
 
@@ -3265,7 +3233,7 @@ void PdfViewOpenGLWidget::render_drawings(DocumentView* dv, const std::vector<Fr
     float time_diff = last_scratchpad_update_datetime.msecsTo(QDateTime::currentDateTime());
     last_scratchpad_update_datetime = QDateTime::currentDateTime();
 
-    const int N_POINT_VERTICES = 10;
+    const int N_POINT_VERTICES = 24;
     float thickness_x = dv->get_zoom_level() / width();
     float thickness_y = dv->get_zoom_level() / height();
     //float thickness_y = thickness_x * width() / height();
@@ -3343,82 +3311,45 @@ void PdfViewOpenGLWidget::render_drawings(DocumentView* dv, const std::vector<Fr
             window_positions.push_back(NormalizedWindowPos{ window_pos.x, window_pos.y });
         }
 
-        std::vector<float> coordinates;
-        /* coordinates.reserve(drawing.points.size() * 8 - 4); */
-        std::vector<float> begin_point_coordinates;
-        std::vector<float> end_point_coordinates;
-        /* std::vector<std::vector<float>> all_point_coordinates; */
+        const float highlight_factor = highlighted ? 3.0f : 1.0f;
+        std::vector<sioyek_stroke_mesh::Point> stroke_points;
+        stroke_points.reserve(drawing.points.size());
+        for (size_t k = 0; k < drawing.points.size(); ++k) {
+            stroke_points.push_back({window_positions[k].x,
+                                     window_positions[k].y,
+                                     drawing.points[k].thickness});
+        }
+        const auto coordinates = sioyek_stroke_mesh::make_strip(
+            stroke_points,
+            static_cast<float>(std::max(1, width())),
+            static_cast<float>(std::max(1, height())),
+            thickness_x * highlight_factor,
+            thickness_y * highlight_factor);
 
-        float first_line_x = (window_positions[1].x - window_positions[0].x) * width();
-        float first_line_y = (window_positions[1].y - window_positions[0].y) * height();
-        float first_line_size = sqrt(first_line_x * first_line_x + first_line_y * first_line_y);
-        first_line_x = first_line_x / first_line_size;
-        first_line_y = first_line_y / first_line_size;
-        float highlight_factor = highlighted ? 3.0f : 1.0f;
-
-        float first_ortho_x = -first_line_y * thickness_x * drawing.points[0].thickness * highlight_factor;
-        float first_ortho_y = first_line_x * thickness_y * drawing.points[0].thickness * highlight_factor;
-
-
-        coordinates.push_back(window_positions[0].x - first_ortho_x);
-        coordinates.push_back(window_positions[0].y - first_ortho_y);
-        coordinates.push_back(window_positions[0].x + first_ortho_x);
-        coordinates.push_back(window_positions[0].y + first_ortho_y);
-        add_coordinates_for_window_point(dv, window_positions[0].x, window_positions[0].y, drawing.points[0].thickness * 2, N_POINT_VERTICES, begin_point_coordinates);
-        float prev_line_x = first_line_x;
-        float prev_line_y = first_line_y;
-
-        for (int line_index = 0; line_index < drawing.points.size() - 1; line_index++) {
-            float line_direction_x = (window_positions[line_index + 1].x - window_positions[line_index].x) * width();
-            float line_direction_y = (window_positions[line_index + 1].y - window_positions[line_index].y) * height();
-            float line_size = sqrt(line_direction_x * line_direction_x + line_direction_y * line_direction_y);
-            line_direction_x = line_direction_x / line_size;
-            line_direction_y = line_direction_y / line_size;
-
-            float ortho_x1 = -line_direction_y * thickness_x * drawing.points[line_index].thickness * highlight_factor;
-            float ortho_y1 = line_direction_x * thickness_y * drawing.points[line_index].thickness * highlight_factor;
-
-            float ortho_x2 = -line_direction_y * thickness_x * drawing.points[line_index + 1].thickness * highlight_factor;
-            float ortho_y2 = line_direction_x * thickness_y * drawing.points[line_index + 1].thickness * highlight_factor;
-
-            float dot_prod_with_prev_direction = (prev_line_x * line_direction_x + prev_line_y * line_direction_y);
-
-            coordinates.push_back(window_positions[line_index].x - ortho_x1);
-            coordinates.push_back(window_positions[line_index].y - ortho_y1);
-            coordinates.push_back(window_positions[line_index].x + ortho_x1);
-            coordinates.push_back(window_positions[line_index].y + ortho_y1);
-
-            coordinates.push_back(window_positions[line_index + 1].x - ortho_x1);
-            coordinates.push_back(window_positions[line_index + 1].y - ortho_y1);
-            coordinates.push_back(window_positions[line_index + 1].x + ortho_x2);
-            coordinates.push_back(window_positions[line_index + 1].y + ortho_y2);
-
-            /* std::vector<float> point_coordinates; */
-            /* add_coordinates_for_window_point(dv, window_positions[line_index+1].x, window_positions[line_index+1].y, drawing.points[line_index+1].thickness * 2, N_POINT_VERTICES, point_coordinates); */
-            /* all_point_coordinates.push_back(point_coordinates); */
-
+        if (!coordinates.empty()) {
+            bind_points(coordinates);
+            glDrawArrays(GL_TRIANGLE_STRIP, 0,
+                         static_cast<GLsizei>(coordinates.size() / 2));
         }
 
-        add_coordinates_for_window_point(dv,
-            window_positions[drawing.points.size() - 1].x,
-            window_positions[drawing.points.size() - 1].y,
-            drawing.points[drawing.points.size() - 1].thickness * 2 * highlight_factor,
-            N_POINT_VERTICES,
-            end_point_coordinates
-        );
-
-        std::vector<int> indices;
-
-
-        //draw the lines
-        bind_points(coordinates);
-        glDrawArrays(GL_TRIANGLE_STRIP, 0, coordinates.size() / 2);
-
-        // draw a point at the start and end of drawing
-        bind_points(begin_point_coordinates);
-        glDrawArrays(GL_TRIANGLE_FAN, 0, begin_point_coordinates.size() / 2);
-        bind_points(end_point_coordinates);
-        glDrawArrays(GL_TRIANGLE_FAN, 1, end_point_coordinates.size() / 2);
+        // Round caps for both ends. The circle data includes its center at
+        // vertex zero, so GL_TRIANGLE_FAN must also start at zero.
+        std::vector<float> cap_coordinates;
+        const float start_diameter = drawing.points.front().thickness * 2.0f * highlight_factor;
+        const float end_diameter = drawing.points.back().thickness * 2.0f * highlight_factor;
+        add_coordinates_for_window_point(dv, window_positions.front().x,
+                                         window_positions.front().y, start_diameter,
+                                         N_POINT_VERTICES, cap_coordinates);
+        bind_points(cap_coordinates);
+        glDrawArrays(GL_TRIANGLE_FAN, 0,
+                     static_cast<GLsizei>(cap_coordinates.size() / 2));
+        cap_coordinates.clear();
+        add_coordinates_for_window_point(dv, window_positions.back().x,
+                                         window_positions.back().y, end_diameter,
+                                         N_POINT_VERTICES, cap_coordinates);
+        bind_points(cap_coordinates);
+        glDrawArrays(GL_TRIANGLE_FAN, 0,
+                     static_cast<GLsizei>(cap_coordinates.size() / 2));
 
         //for (auto coords : all_point_coordinates) {
         //    bind_points(coords);
