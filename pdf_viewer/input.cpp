@@ -5576,6 +5576,7 @@ public:
     SetFreehandType(MainWidget* w) : SymbolCommand(cname, w) {};
     void perform() {
         widget->current_freehand_type = symbol;
+        widget->update_desktop_draw_toolbar();
     }
 
     bool requires_document() { return false; }
@@ -6070,6 +6071,14 @@ public:
         widget->show_touch_main_menu();
     }
 
+};
+
+class ShowDesktopDrawingMenu : public Command {
+public:
+    static inline const std::string cname = "show_draw_controls";
+    static inline const std::string hname = "Toggle desktop drawing controls";
+    ShowDesktopDrawingMenu(MainWidget* w) : Command(cname, w) {};
+    void perform() { widget->show_desktop_draw_controls(); }
 };
 
 class ShowTouchDrawingMenu : public Command {
@@ -7494,6 +7503,7 @@ CommandManager::CommandManager(ConfigManager* config_manager) {
     register_command<ShowTouchMainMenu>();
     register_command<ShowTouchSettingsMenu>();
     register_command<ShowTouchDrawingMenu>();
+    register_command<ShowDesktopDrawingMenu>();
     register_command<DebugCommand>();
     register_command<SelectNextCharCommand>();
     register_command<UnselectLastCharCommand>();

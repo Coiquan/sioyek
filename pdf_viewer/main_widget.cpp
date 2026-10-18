@@ -25,6 +25,7 @@
 #include <memory>
 #include <cctype>
 #include <cstdlib>
+#include <cmath>
 #include <qpainterpath.h>
 #include <qabstractitemmodel.h>
 #include <qapplication.h>
@@ -68,6 +69,14 @@
 #include <qqmlengine.h>
 #include <qtextdocumentfragment.h>
 #include <qmenubar.h>
+#include <qtoolbar.h>
+#include <qaction.h>
+#include <qsizepolicy.h>
+#include <qpen.h>
+#include <qactiongroup.h>
+#include <qicon.h>
+#include <qpixmap.h>
+#include <qpainter.h>
 #include <qstylehints.h>
 
 #include <mupdf/fitz.h>
@@ -431,11 +440,12 @@ public:
 
     void update_pos() {
         WindowPos wp = docpos.to_window(main_widget->main_document_view);
+        QPoint viewport_origin = main_widget->opengl_widget->mapTo(main_widget, QPoint(0, 0));
         if (is_begin) {
-            move(wp.x - width(), wp.y - height());
+            move(wp.x + viewport_origin.x() - width(), wp.y + viewport_origin.y() - height());
         }
         else {
-            move(wp.x, wp.y);
+            move(wp.x + viewport_origin.x(), wp.y + viewport_origin.y());
         }
 
     }
@@ -464,12 +474,9 @@ public:
     DocumentPos get_docpos() {
         if (!docpos_needs_recompute) return docpos;
 
-        if (is_begin) {
-            docpos = WindowPos{ x() + width(), y() + height() }.to_document(main_widget->main_document_view);
-        }
-        else {
-            docpos = WindowPos{x(), y()}.to_document(main_widget->main_document_view);
-        }
+        QPoint tip = is_begin ? QPoint(x() + width(), y() + height()) : pos();
+        QPoint view_tip = main_widget->to_pdf_viewport_pos(tip);
+        docpos = WindowPos{view_tip.x(), view_tip.y()}.to_document(main_widget->main_document_view);
 
         return docpos;
 
@@ -489,7 +496,7 @@ void MainWidget::resizeEvent(QResizeEvent* resize_event) {
     main_window_height = size().height();
 
     if (scratchpad) {
-        scratchpad->on_view_size_change(resize_event->size().width(), resize_event->size().height());
+        scratchpad->on_view_size_change(opengl_widget->width(), opengl_widget->height());
         invalidate_render();
     }
     if (main_document_view->get_is_auto_resize_mode()) {
@@ -501,7 +508,10 @@ void MainWidget::resizeEvent(QResizeEvent* resize_event) {
 
     if (text_command_line_edit_container != nullptr) {
         text_command_line_edit_container->move(0, 0);
-        text_command_line_edit_container->resize(main_window_width, status_bar_height);
+        text_command_line_edit_container->resize(main_window_width,
+            (desktop_draw_toolbar_ && desktop_draw_toolbar_->isVisible())
+                ? std::max(status_bar_height, desktop_draw_toolbar_->sizeHint().height())
+                : status_bar_height);
     }
 
     if (status_label != nullptr) {
@@ -571,8 +581,8 @@ void MainWidget::set_overview_link(PdfLink link) {
 }
 
 void MainWidget::handle_selection_mouse_edge_scrolling(QMouseEvent* mouse_event){
-    bool are_we_above_the_window = mapFromGlobal(mouse_event->globalPos()).y() < 30;
-    bool are_we_below_the_window = mapFromGlobal(mouse_event->globalPos()).y() > main_window_height - 30;
+    bool are_we_above_the_window = to_pdf_viewport_pos(mapFromGlobal(mouse_event->globalPos())).y() < 30;
+    bool are_we_below_the_window = to_pdf_viewport_pos(mapFromGlobal(mouse_event->globalPos())).y() > opengl_widget->height() - 30;
     if (are_we_above_the_window){
         validation_interval_timer->setInterval(0);
         set_fixed_velocity(SMOOTH_MOVE_MAX_VELOCITY, 0);
@@ -608,7 +618,7 @@ void MainWidget::mouseMoveEvent(QMouseEvent* mouse_event) {
         // Rendering rotates the texture, not the viewport axes. Screen-space
         // panning remains valid; hit testing and text selection do not.
         if (mouse_drag_mode && should_drag()) {
-            pan_document_from_mouse_pos(WindowPos(mouse_event->pos()));
+            pan_document_from_mouse_pos(WindowPos(to_pdf_viewport_pos(mouse_event->pos())));
         }
         return;
     }
@@ -618,7 +628,7 @@ void MainWidget::mouseMoveEvent(QMouseEvent* mouse_event) {
     }
 
     if (should_draw(false) && is_drawing) {
-        handle_drawing_move(mouse_event->pos(), -1.0f);
+        handle_drawing_move(to_pdf_viewport_pos(mouse_event->pos()), -1.0f);
         validate_render();
         return;
     }
@@ -636,14 +646,14 @@ void MainWidget::mouseMoveEvent(QMouseEvent* mouse_event) {
         }
     }
 
-    WindowPos mpos(mouse_event->pos());
+    WindowPos mpos(to_pdf_viewport_pos(mouse_event->pos()));
     AbsoluteDocumentPos abs_mpos = get_window_abspos(mpos);
     NormalizedWindowPos normal_mpos = mpos.to_window_normalized(main_document_view);
 
     if (freehand_drawing_move_data) {
         // update temp drawings of opengl widget
-        //AbsoluteDocumentPos mouse_abspos = WindowPos(mouse_event->pos()).to_absolute(main_document_view);
-        AbsoluteDocumentPos mouse_abspos = get_window_abspos(WindowPos(mouse_event->pos()));
+        //AbsoluteDocumentPos mouse_abspos = WindowPos(to_pdf_viewport_pos(mouse_event->pos())).to_absolute(main_document_view);
+        AbsoluteDocumentPos mouse_abspos = get_window_abspos(WindowPos(to_pdf_viewport_pos(mouse_event->pos())));
         opengl_widget->moving_drawings.clear();
         opengl_widget->moving_pixmaps.clear();
         move_selected_drawings(mouse_abspos, opengl_widget->moving_drawings, opengl_widget->moving_pixmaps);
@@ -673,7 +683,7 @@ void MainWidget::mouseMoveEvent(QMouseEvent* mouse_event) {
             update_position_buffer();
         }
         if (was_last_mouse_down_in_ruler_next_rect || was_last_mouse_down_in_ruler_prev_rect) {
-            WindowPos current_window_pos = { mouse_event->pos().x(), mouse_event->pos().y() };
+            WindowPos current_window_pos = { to_pdf_viewport_pos(mouse_event->pos()).x(), to_pdf_viewport_pos(mouse_event->pos()).y() };
             int distance = current_window_pos.manhattan(ruler_moving_last_window_pos);
             ruler_moving_last_window_pos = current_window_pos;
             ruler_moving_distance_traveled += distance;
@@ -1291,9 +1301,14 @@ MainWidget::MainWidget(fz_context* mupdf_context,
     hlayout->addWidget(opengl_widget);
     hlayout->addWidget(scroll_bar);
 
+    // The desktop drawing controls occupy a real row above the OpenGL viewport.
+    // This avoids drawing over the PDF (or a floating search widget).
+    create_desktop_draw_toolbar();
+
     layout->setSpacing(0);
     layout->setContentsMargins(0, 0, 0, 0);
     opengl_widget->setAttribute(Qt::WA_TransparentForMouseEvents);
+    layout->addWidget(desktop_draw_toolbar_);
     layout->addLayout(hlayout);
 
 #ifdef SIOYEK_ANDROID
@@ -1892,6 +1907,7 @@ void MainWidget::move_document_screens(int num_screens) {
 
 void MainWidget::on_config_file_changed(ConfigManager* new_config) {
 
+    update_desktop_draw_toolbar();
     status_label->setStyleSheet(get_status_stylesheet());
     status_label->setFont(QFont(get_status_font_face_name()));
     text_command_line_edit_container->setStyleSheet(get_status_stylesheet());
@@ -2131,7 +2147,7 @@ void MainWidget::open_document(const std::wstring& path, std::optional<float> of
         main_window_width = main_document_view->get_view_width();
     }
 
-    main_document_view->on_view_size_change(main_window_width, main_window_height);
+    main_document_view->on_view_size_change(opengl_widget->width(), opengl_widget->height());
     main_document_view->open_document(path, &this->is_render_invalidated);
     update_two_page_render_cache();
     if (!doc()){
@@ -2230,7 +2246,7 @@ void MainWidget::open_document_at_location(const Path& path_,
         show_error_message(L"Could not open file2: " + path);
     }
     else {
-        main_document_view->on_view_size_change(main_window_width, main_window_height);
+        main_document_view->on_view_size_change(opengl_widget->width(), opengl_widget->height());
 
         AbsoluteDocumentPos absolute_pos = DocumentPos{ page, x_loc.value_or(0), y_loc.value_or(0) }.to_absolute(doc());
 
@@ -2576,7 +2592,7 @@ void MainWidget::handle_left_click(WindowPos click_pos, bool down, bool is_shift
     if (selected_freehand_drawings) {
 
         //AbsoluteDocumentPos mpos_absolute = WindowPos(mapFromGlobal(QCursor::pos())).to_absolute(main_document_view);
-        AbsoluteDocumentPos mpos_absolute = get_window_abspos(WindowPos(mapFromGlobal(QCursor::pos())));
+        AbsoluteDocumentPos mpos_absolute = get_window_abspos(WindowPos(to_pdf_viewport_pos(mapFromGlobal(QCursor::pos()))));
 
         if (selected_freehand_drawings->selection_absrect.contains(mpos_absolute)) {
             handle_freehand_drawing_selection_click(mpos_absolute);
@@ -2938,7 +2954,7 @@ void MainWidget::set_main_document_view_state(DocumentViewState new_view_state) 
         //setwindowtitle(qstring::fromstdwstring(new_view_state.document_path));
     }
 
-    main_document_view->on_view_size_change(main_window_width, main_window_height);
+    main_document_view->on_view_size_change(opengl_widget->width(), opengl_widget->height());
     main_document_view->set_book_state(new_view_state.book_state);
 }
 
@@ -3169,7 +3185,7 @@ void MainWidget::mouseReleaseEvent(QMouseEvent* mevent) {
 
 
     if (is_drawing) {
-        finish_drawing(mevent->pos());
+        finish_drawing(to_pdf_viewport_pos(mevent->pos()));
         invalidate_render();
         return;
     }
@@ -3207,7 +3223,7 @@ void MainWidget::mouseReleaseEvent(QMouseEvent* mevent) {
             execute_macro_if_enabled(ALT_CLICK_COMMAND);
         }
         else {
-            handle_left_click({ mevent->pos().x(), mevent->pos().y() }, false, is_shift_pressed, is_control_pressed, is_command_pressed, is_alt_pressed);
+            handle_left_click({ to_pdf_viewport_pos(mevent->pos()).x(), to_pdf_viewport_pos(mevent->pos()).y() }, false, is_shift_pressed, is_control_pressed, is_command_pressed, is_alt_pressed);
             if (is_select_highlight_mode && (main_document_view->selected_character_rects.size() > 0)) {
                 main_document_view->add_highlight(selection_begin, selection_end, select_highlight_type);
                 clear_selected_text();
@@ -3234,7 +3250,7 @@ void MainWidget::mouseReleaseEvent(QMouseEvent* mevent) {
             execute_macro_if_enabled(ALT_RIGHT_CLICK_COMMAND);
         }
         else {
-            handle_right_click({ mevent->pos().x(), mevent->pos().y() }, false, is_shift_pressed, is_control_pressed, is_command_pressed, is_alt_pressed);
+            handle_right_click({ to_pdf_viewport_pos(mevent->pos()).x(), to_pdf_viewport_pos(mevent->pos()).y() }, false, is_shift_pressed, is_control_pressed, is_command_pressed, is_alt_pressed);
         }
     }
 
@@ -3260,7 +3276,7 @@ void MainWidget::mouseReleaseEvent(QMouseEvent* mevent) {
                         execute_macro_if_enabled(MIDDLE_CLICK_COMMAND);
                     }
                     else{
-                        smart_jump_under_pos({ mevent->pos().x(), mevent->pos().y() });
+                        smart_jump_under_pos({ to_pdf_viewport_pos(mevent->pos()).x(), to_pdf_viewport_pos(mevent->pos()).y() });
                     }
                 }
             }
@@ -3294,7 +3310,7 @@ int MainWidget::update_recent_clicks(AbsoluteDocumentPos mouse_abspos) {
 
 void MainWidget::mouseDoubleClickEvent(QMouseEvent* mevent) {
     if (!TOUCH_MODE) {
-        WindowPos click_pos = { mevent->pos().x(), mevent->pos().y() };
+        WindowPos click_pos = { to_pdf_viewport_pos(mevent->pos()).x(), to_pdf_viewport_pos(mevent->pos()).y() };
         AbsoluteDocumentPos mouse_abspos = main_document_view->window_to_absolute_document_pos(click_pos);
 
         if (mevent->button() == Qt::MouseButton::LeftButton) {
@@ -3350,7 +3366,7 @@ void MainWidget::mousePressEvent(QMouseEvent* mevent) {
     if (is_rotated() && mouse_drag_mode && mevent->button() == Qt::LeftButton
         && !is_shift_pressed && !is_control_pressed && !is_command_pressed && !is_alt_pressed) {
         if (main_document_view_has_document()) {
-            last_mouse_down_window_pos = WindowPos(mevent->pos());
+            last_mouse_down_window_pos = WindowPos(to_pdf_viewport_pos(mevent->pos()));
             last_mouse_down_document_virtual_offset = dv()->get_virtual_offset();
             is_dragging = true;
         }
@@ -3358,7 +3374,7 @@ void MainWidget::mousePressEvent(QMouseEvent* mevent) {
     }
 
     if (!TOUCH_MODE && mevent->button() == Qt::MouseButton::LeftButton) {
-        QPoint local_mpos = mapFromGlobal(QCursor::pos());
+        QPoint local_mpos = to_pdf_viewport_pos(mapFromGlobal(QCursor::pos()));
         AbsoluteDocumentPos current_pos = WindowPos(local_mpos).to_absolute(main_document_view);
         int count = update_recent_clicks(current_pos);
 
@@ -3369,17 +3385,17 @@ void MainWidget::mousePressEvent(QMouseEvent* mevent) {
     }
 
     if (mevent->button() == Qt::MouseButton::LeftButton) {
-        handle_left_click({ mevent->pos().x(), mevent->pos().y() }, true, is_shift_pressed, is_control_pressed, is_command_pressed, is_alt_pressed);
+        handle_left_click({ to_pdf_viewport_pos(mevent->pos()).x(), to_pdf_viewport_pos(mevent->pos()).y() }, true, is_shift_pressed, is_control_pressed, is_command_pressed, is_alt_pressed);
     }
 
     if (mevent->button() == Qt::MouseButton::RightButton) {
-        handle_right_click({ mevent->pos().x(), mevent->pos().y() }, true, is_shift_pressed, is_control_pressed, is_command_pressed, is_alt_pressed);
+        handle_right_click({ to_pdf_viewport_pos(mevent->pos()).x(), to_pdf_viewport_pos(mevent->pos()).y() }, true, is_shift_pressed, is_control_pressed, is_command_pressed, is_alt_pressed);
     }
 
     if (mevent->button() == Qt::MouseButton::MiddleButton) {
         last_middle_down_time = QTime::currentTime();
         middle_click_hold_command_already_executed = false;
-        last_mouse_down_window_pos = WindowPos{ mevent->pos().x(), mevent->pos().y() };
+        last_mouse_down_window_pos = WindowPos{ to_pdf_viewport_pos(mevent->pos()).x(), to_pdf_viewport_pos(mevent->pos()).y() };
         last_mouse_down_document_virtual_offset = dv()->get_virtual_offset();
 
         AbsoluteDocumentPos abs_mpos = dv()->window_to_absolute_document_pos(last_mouse_down_window_pos);
@@ -3700,7 +3716,12 @@ void MainWidget::show_textbar(const std::wstring& command_name, const std::wstri
             text_command_line_edit->setText(init);
         }
         text_command_line_edit_label->setText(QString::fromStdWString(command_name));
+        if (desktop_draw_toolbar_ && desktop_draw_toolbar_->isVisible()) {
+            text_command_line_edit_container->resize(width(),
+                std::max(get_status_bar_height(), desktop_draw_toolbar_->sizeHint().height()));
+        }
         text_command_line_edit_container->show();
+        text_command_line_edit_container->raise();
         text_command_line_edit->setFocus();
         if (initial_value.size() > 0) {
             text_command_line_edit->selectAll();
@@ -6895,7 +6916,7 @@ bool MainWidget::event(QEvent* event) {
 
     if (event->type() == QEvent::WindowActivate) {
         if (is_scratchpad_mode()) {
-            scratchpad->on_view_size_change(width(), height());
+            scratchpad->on_view_size_change(opengl_widget->width(), opengl_widget->height());
         }
     }
     if ((should_draw(true)) && te) {
@@ -7054,7 +7075,7 @@ bool MainWidget::event(QEvent* event) {
                         opengl_widget->zoom_overview(scale);
                     }
                     else{
-                        QPoint cursor = mapFromGlobal(QCursor::pos());
+                        QPoint cursor = to_pdf_viewport_pos(mapFromGlobal(QCursor::pos()));
                         WindowPos cursor_pos = {cursor.x(), cursor.y()};
                         dv()->zoom_in_cursor(cursor_pos, scale);
                     }
@@ -7233,7 +7254,7 @@ bool MainWidget::handle_quick_tap(WindowPos click_pos) {
 
     if (TOUCH_MODE && opengl_widget->get_overview_page()) {
         // in touch mode, quick tapping outside the overview window should close it
-        auto window_pos = mapFromGlobal(QCursor::pos());
+        auto window_pos = to_pdf_viewport_pos(mapFromGlobal(QCursor::pos()));
         NormalizedWindowPos nwp = main_document_view->window_to_normalized_window_pos({ window_pos.x(), window_pos.y() });
 
         if (!opengl_widget->is_window_point_in_overview({ nwp.x, nwp.y })) {
@@ -7498,7 +7519,9 @@ void MainWidget::update_highlight_buttons_position() {
         DocumentPos docpos = doc()->absolute_to_page_pos_uncentered(hlpos);
 
         WindowPos windowpos = main_document_view->document_to_window_pos_in_pixels_uncentered(docpos);
-        get_highlight_buttons()->move(get_highlight_buttons()->pos().x(), windowpos.y - get_highlight_buttons()->height());
+        const int view_top = opengl_widget->mapTo(this, QPoint(0, 0)).y();
+        get_highlight_buttons()->move(get_highlight_buttons()->pos().x(),
+            windowpos.y + view_top - get_highlight_buttons()->height());
     }
 }
 
@@ -7521,7 +7544,7 @@ void MainWidget::show_command_documentation(QString command_name) {
 
 
 bool MainWidget::show_contextual_context_menu() {
-    auto p = mapFromGlobal(QCursor::pos());
+    auto p = to_pdf_viewport_pos(mapFromGlobal(QCursor::pos()));
     WindowPos window_pos = WindowPos{
         p.x(), p.y()
     };
@@ -8425,13 +8448,13 @@ void MainWidget::handle_pen_drawing_event(QTabletEvent* te) {
     }
 
     if (te->type() == QEvent::TabletRelease) {
-        finish_drawing(te->pos());
+        finish_drawing(to_pdf_viewport_pos(te->pos()));
         invalidate_render();
     }
 
     if (te->type() == QEvent::TabletMove) {
         if (is_drawing) {
-            handle_drawing_move(te->pos(), te->pressure());
+            handle_drawing_move(to_pdf_viewport_pos(te->pos()), te->pressure());
             validate_render();
         }
 
@@ -8595,6 +8618,20 @@ std::string MainWidget::get_current_mode_string() {
 }
 
 void MainWidget::handle_drawing_ui_visibilty() {
+    if (desktop_draw_toolbar_) {
+        // Both drawing modes use the same desktop toolbar. Hiding the drawing
+        // mode must also hide the toolbar, including when exiting via Esc.
+        const bool drawing = freehand_drawing_mode != DrawingMode::None;
+        set_desktop_draw_toolbar_visible(drawing);
+        if (drawing) {
+            update_desktop_draw_toolbar();
+        }
+        else if (draw_controls_) {
+            restore_draw_controls_after_rect_selection = false;
+            draw_controls_->hide();
+        }
+        return;
+    }
     if (!TOUCH_MODE && (draw_controls_ == nullptr)) {
         return;
     }
@@ -9171,7 +9208,7 @@ bool MainWidget::should_drag() {
 }
 
 void MainWidget::handle_freehand_drawing_move_finish() {
-    QPoint p = last_press_point = mapFromGlobal(QCursor::pos());
+    QPoint p = to_pdf_viewport_pos(mapFromGlobal(QCursor::pos()));
     //AbsoluteDocumentPos mpos_absolute = main_document_view->window_to_absolute_document_pos({ p.x(), p.y() });
     AbsoluteDocumentPos mpos_absolute = get_window_abspos({ p.x(), p.y() });
     std::vector<FreehandDrawing> moved_drawings;
@@ -9423,7 +9460,7 @@ std::optional<Portal> MainWidget::get_portal_under_absolute_pos(AbsoluteDocument
 }
 
 AbsoluteDocumentPos MainWidget::get_cursor_abspos() {
-    QPoint current_mouse_window_point = mapFromGlobal(QCursor::pos());
+    QPoint current_mouse_window_point = to_pdf_viewport_pos(mapFromGlobal(QCursor::pos()));
     WindowPos current_mouse_window_pos = { current_mouse_window_point.x(), current_mouse_window_point.y() };
     return main_document_view->window_to_absolute_document_pos(current_mouse_window_pos);
 }
@@ -11006,7 +11043,7 @@ void MainWidget::toggle_scratchpad_mode(){
         opengl_widget->set_scratchpad(nullptr);
     }
     else {
-        scratchpad->on_view_size_change(width(), height());
+        scratchpad->on_view_size_change(opengl_widget->width(), opengl_widget->height());
         opengl_widget->set_scratchpad(scratchpad);
     }
 
@@ -11018,6 +11055,8 @@ void MainWidget::toggle_scratchpad_mode(){
             draw_controls_->controls_ui->set_scratchpad_mode(false);
         }
     }
+    update_desktop_draw_toolbar();
+    invalidate_render();
 }
 
 void MainWidget::add_pixmap_to_scratchpad(QPixmap pixmap) {
@@ -11124,8 +11163,215 @@ void MainWidget::set_current_freehand_alpha(float alpha) {
 }
 
 void MainWidget::show_draw_controls() {
+    // Keep the legacy touch toolbar available, but never display it together
+    // with the new desktop toolbar.
+    if (desktop_draw_toolbar_ && desktop_draw_toolbar_->isVisible()) {
+        desktop_draw_toolbar_->hide();
+        central_widget->layout()->activate();
+        main_document_view->on_view_size_change(opengl_widget->width(), opengl_widget->height());
+    }
     get_draw_controls()->show();
 }
+
+// Unlike the legacy touch/QML toolbar, this row uses native Qt Widgets and
+// participates in the central layout, so it does not cover the document.
+void MainWidget::create_desktop_draw_toolbar() {
+    desktop_draw_toolbar_ = new QToolBar(central_widget);
+    desktop_draw_toolbar_->setObjectName("desktopDrawControls");
+    desktop_draw_toolbar_->setMovable(false);
+    desktop_draw_toolbar_->setFloatable(false);
+    desktop_draw_toolbar_->setToolButtonStyle(Qt::ToolButtonTextBesideIcon);
+    desktop_draw_toolbar_->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Fixed);
+    desktop_draw_toolbar_->setIconSize(QSize(18, 18));
+    desktop_draw_toolbar_->setMinimumWidth(0);
+    desktop_draw_toolbar_->hide();
+
+    desktop_scratchpad_action_ = desktop_draw_toolbar_->addAction(tr("Scratchpad"));
+    desktop_scratchpad_action_->setToolTip(tr("Switch between PDF and scratchpad"));
+    connect(desktop_scratchpad_action_, &QAction::triggered, this, [this]() {
+        toggle_scratchpad_mode();
+    });
+
+    desktop_save_action_ = desktop_draw_toolbar_->addAction(tr("Save"));
+    connect(desktop_save_action_, &QAction::triggered, this, [this]() {
+        run_command_with_name("save_scratchpad");
+        invalidate_render();
+    });
+    desktop_load_action_ = desktop_draw_toolbar_->addAction(tr("Load"));
+    connect(desktop_load_action_, &QAction::triggered, this, [this]() {
+        run_command_with_name("load_scratchpad");
+        invalidate_render();
+    });
+
+    desktop_draw_toolbar_->addSeparator();
+    auto* move_action = desktop_draw_toolbar_->addAction(tr("Move"));
+    move_action->setToolTip(tr("Select and move existing freehand strokes"));
+    connect(move_action, &QAction::triggered, this, [this]() {
+        run_command_with_name("select_freehand_drawings");
+        invalidate_render();
+    });
+
+    desktop_screenshot_action_ = desktop_draw_toolbar_->addAction(tr("Screenshot"));
+    desktop_screenshot_action_->setToolTip(tr("Select scratchpad strokes to copy to the PDF"));
+    connect(desktop_screenshot_action_, &QAction::triggered, this, [this]() {
+        run_command_with_name("copy_drawings_from_scratchpad");
+        invalidate_render();
+    });
+
+    desktop_draw_toolbar_->addSeparator();
+    auto* size_label = new QLabel(tr("Size"), desktop_draw_toolbar_);
+    size_label->setContentsMargins(6, 0, 4, 0);
+    desktop_draw_toolbar_->addWidget(size_label);
+    auto* sizes = new QActionGroup(desktop_draw_toolbar_);
+    sizes->setExclusive(false);
+    for (float thickness : { 1.0f, 2.0f, 3.0f, 5.0f, 8.0f }) {
+        QAction* action = desktop_draw_toolbar_->addAction(QString::number(thickness));
+        action->setCheckable(true);
+        action->setData(thickness);
+        sizes->addAction(action);
+        desktop_size_actions_.push_back(action);
+        connect(action, &QAction::triggered, this, [this, thickness]() {
+            set_freehand_thickness(thickness);
+            if (freehand_drawing_mode == DrawingMode::None) {
+                mouse_drag_mode = false;
+                set_hand_drawing_mode(true);
+            }
+            update_desktop_draw_toolbar();
+            setFocus();
+        });
+    }
+
+    desktop_draw_toolbar_->addSeparator();
+    auto* color_label = new QLabel(tr("Color"), desktop_draw_toolbar_);
+    color_label->setContentsMargins(6, 0, 4, 0);
+    desktop_draw_toolbar_->addWidget(color_label);
+    auto* colors = new QActionGroup(desktop_draw_toolbar_);
+    colors->setExclusive(false);
+    // Presets are indices into Sioyek's configurable 26-color palette.
+    for (char symbol : { 'a', 'b', 'f', 'o', 'r', 'y' }) {
+        QAction* action = desktop_draw_toolbar_->addAction(QString(QChar::fromLatin1(symbol)).toUpper());
+        action->setCheckable(true);
+        action->setData(QChar(symbol));
+        colors->addAction(action);
+        desktop_color_actions_.push_back(action);
+        connect(action, &QAction::triggered, this, [this, symbol]() {
+            current_freehand_type = symbol;
+            if (freehand_drawing_mode == DrawingMode::None) {
+                mouse_drag_mode = false;
+                set_hand_drawing_mode(true);
+            }
+            update_desktop_draw_toolbar();
+            setFocus();
+        });
+    }
+
+    desktop_draw_toolbar_->addSeparator();
+    auto* erase_action = desktop_draw_toolbar_->addAction(tr("Erase"));
+    erase_action->setToolTip(tr("Delete strokes inside a selected rectangle"));
+    connect(erase_action, &QAction::triggered, this, [this]() {
+        run_command_with_name("delete_freehand_drawings");
+        invalidate_render();
+    });
+
+    // Explicit close is kept at the right edge. The show_draw_controls command
+    // itself also toggles the row, so no additional shortcut is required.
+    auto* spacer = new QWidget(desktop_draw_toolbar_);
+    spacer->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Preferred);
+    desktop_draw_toolbar_->addWidget(spacer);
+    auto* close_action = desktop_draw_toolbar_->addAction(tr("Close"));
+    connect(close_action, &QAction::triggered, this, [this]() {
+        show_desktop_draw_controls();
+    });
+
+    update_desktop_draw_toolbar();
+}
+
+void MainWidget::update_desktop_draw_toolbar() {
+    if (!desktop_draw_toolbar_) return;
+    const bool scratch = is_scratchpad_mode();
+    desktop_save_action_->setVisible(scratch);
+    desktop_load_action_->setVisible(scratch);
+    desktop_screenshot_action_->setVisible(scratch);
+    desktop_save_action_->setEnabled(doc() != nullptr);
+    desktop_load_action_->setEnabled(doc() != nullptr);
+
+    for (auto* action : desktop_size_actions_) {
+        action->setChecked(std::abs(action->data().toFloat() - freehand_thickness) < 0.01f);
+    }
+    for (auto* action : desktop_color_actions_) {
+        const char type = action->data().toChar().toLatin1();
+        action->setChecked(current_freehand_type == type);
+        const int index = type - 'a';
+        const float* rgb = &HIGHLIGHT_COLORS[3 * index];
+        QPixmap swatch(20, 20);
+        swatch.fill(Qt::transparent);
+        QPainter painter(&swatch);
+        painter.setRenderHint(QPainter::Antialiasing);
+        painter.setPen(QPen(Qt::gray, 1));
+        painter.setBrush(convert_float3_to_qcolor(rgb));
+        painter.drawEllipse(QRectF(2, 2, 16, 16));
+        action->setIcon(QIcon(swatch));
+    }
+    desktop_draw_toolbar_->setStyleSheet(
+        "QToolBar { " + get_ui_stylesheet(false) +
+        " border-bottom: 1px solid palette(mid); spacing: 3px; padding: 4px; }"
+        " QToolButton { border: 1px solid transparent; padding: 5px 7px; }"
+        " QToolButton:hover { border-color: palette(mid); }"
+        " QToolButton:checked { border-color: palette(highlight); }"
+    );
+}
+
+void MainWidget::set_desktop_draw_toolbar_visible(bool visible) {
+    if (!desktop_draw_toolbar_ || desktop_draw_toolbar_->isVisible() == visible) return;
+    if (visible) {
+        if (!main_document_view_has_document()) return;
+        // Never display both native and legacy QML drawing interfaces.
+        if (draw_controls_) {
+            draw_controls_->hide();
+            restore_draw_controls_after_rect_selection = false;
+        }
+        mouse_drag_mode = false;
+    }
+    desktop_draw_toolbar_->setVisible(visible);
+    if (visible) {
+        update_desktop_draw_toolbar();
+    }
+    else if (text_command_line_edit_container->isVisible()) {
+        text_command_line_edit_container->resize(width(), get_status_bar_height());
+    }
+    // Changing the toolbar height changes the PDF viewport and its coordinates.
+    central_widget->layout()->activate();
+    main_document_view->on_view_size_change(opengl_widget->width(), opengl_widget->height());
+    if (main_document_view->get_is_auto_resize_mode() && main_document_view_has_document()) {
+        main_document_view->fit_to_page_width();
+    }
+    if (scratchpad) {
+        scratchpad->on_view_size_change(opengl_widget->width(), opengl_widget->height());
+    }
+    invalidate_render();
+    setFocus();
+}
+
+void MainWidget::show_desktop_draw_controls() {
+    if (!desktop_draw_toolbar_) return;
+    if (desktop_draw_toolbar_->isVisible()) {
+        exit_freehand_drawing_mode();
+    }
+    else if (main_document_view_has_document()) {
+        if (freehand_drawing_mode == DrawingMode::None) {
+            set_hand_drawing_mode(true);
+        }
+        else {
+            set_desktop_draw_toolbar_visible(true);
+        }
+    }
+}
+
+QPoint MainWidget::to_pdf_viewport_pos(QPoint window_pos) const {
+    if (!opengl_widget) return window_pos;
+    return window_pos - opengl_widget->mapTo(this, QPoint(0, 0));
+}
+
 
 PaperDownloadFinishedAction MainWidget::get_default_paper_download_finish_action() {
     if (PAPER_DOWNLOAD_CREATE_PORTAL) {
@@ -11533,7 +11779,7 @@ void MainWidget::set_highlighted_tags(std::vector<std::string> tags) {
 }
 
 AbsoluteDocumentPos MainWidget::get_mouse_abspos() {
-    auto pos = mapFromGlobal(QCursor::pos());
+    auto pos = to_pdf_viewport_pos(mapFromGlobal(QCursor::pos()));
     WindowPos window_pos = { pos.x(), pos.y() };
     AbsoluteDocumentPos abspos = window_pos.to_absolute(main_document_view);
     return abspos;

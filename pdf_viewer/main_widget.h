@@ -30,6 +30,8 @@ class QTimer;
 class QDragEvent;
 class QDropEvent;
 class QScrollBar;
+class QToolBar;
+class QAction;
 class QTextToSpeech;
 class QStringListModel;
 class QLabel;
@@ -183,6 +185,13 @@ public:
     PdfViewOpenGLWidget* opengl_widget = nullptr;
     PdfViewOpenGLWidget* helper_opengl_widget_ = nullptr;
     QScrollBar* scroll_bar = nullptr;
+    QToolBar* desktop_draw_toolbar_ = nullptr;
+    QAction* desktop_scratchpad_action_ = nullptr;
+    QAction* desktop_save_action_ = nullptr;
+    QAction* desktop_load_action_ = nullptr;
+    QAction* desktop_screenshot_action_ = nullptr;
+    std::vector<QAction*> desktop_size_actions_;
+    std::vector<QAction*> desktop_color_actions_;
 
     QJsonDocument commands_doc_json_document;
     QJsonDocument config_doc_json_document;
@@ -1007,6 +1016,11 @@ public:
     float get_current_freehand_alpha();
     void set_current_freehand_alpha(float alpha);
     void show_draw_controls();
+    void show_desktop_draw_controls();
+    void set_desktop_draw_toolbar_visible(bool visible);
+    void create_desktop_draw_toolbar();
+    void update_desktop_draw_toolbar();
+    QPoint to_pdf_viewport_pos(QPoint window_pos) const;
     PaperDownloadFinishedAction get_default_paper_download_finish_action();
     QString get_paper_download_finish_action_string(PaperDownloadFinishedAction action);
     PaperDownloadFinishedAction get_paper_download_action_from_string(QString str);
