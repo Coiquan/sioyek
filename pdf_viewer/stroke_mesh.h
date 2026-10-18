@@ -139,7 +139,7 @@ inline std::vector<float> make_strip(const std::vector<Point>& input,
 
     std::vector<float> vertices;
     vertices.reserve(points.size() * 8);
-    auto emit = [&](const Point& p, Vec2 left, Vec2 right) {
+    auto append_vertex_pair = [&](const Point& p, Vec2 left, Vec2 right) {
         const float radius = std::max(0.0f, p.thickness);
         vertices.insert(vertices.end(), {
             p.x + radius_scale_x * radius * left.x,
@@ -156,7 +156,7 @@ inline std::vector<float> make_strip(const std::vector<Point>& input,
     for (int j = cap_sections; j > 0; --j) {
         const float angle = 1.57079632679f * static_cast<float>(j) / cap_sections;
         const float c = std::cos(angle), st = std::sin(angle);
-        emit(points.front(), {first_normal.x * c - first.x * st,
+        append_vertex_pair(points.front(), {first_normal.x * c - first.x * st,
                               first_normal.y * c - first.y * st},
                              {-first_normal.x * c - first.x * st,
                               -first_normal.y * c - first.y * st});
@@ -168,7 +168,7 @@ inline std::vector<float> make_strip(const std::vector<Point>& input,
         const Vec2 n0 = {-prev.y, prev.x};
         const Vec2 n1 = {-next.y, next.x};
         if (i == 0 || i + 1 == points.size()) {
-            emit(points[i], n0, {-n0.x, -n0.y});
+            append_vertex_pair(points[i], n0, {-n0.x, -n0.y});
             continue;
         }
         const float cross = prev.x * next.y - prev.y * next.x;
@@ -176,7 +176,7 @@ inline std::vector<float> make_strip(const std::vector<Point>& input,
                            prev.x * next.x + prev.y * next.y));
         const float turn = std::atan2(cross, dot);
         if (std::abs(turn) < 0.015f) {
-            emit(points[i], n1, {-n1.x, -n1.y});
+            append_vertex_pair(points[i], n1, {-n1.x, -n1.y});
             continue;
         }
         // Inside edge uses a bounded intersection; outside edge sweeps a
@@ -201,8 +201,8 @@ inline std::vector<float> make_strip(const std::vector<Point>& input,
             const float c = std::cos(angle), s = std::sin(angle);
             Vec2 outer = {outer_begin.x * c - outer_begin.y * s,
                           outer_begin.x * s + outer_begin.y * c};
-            if (outer_left) emit(points[i], outer, inner_side);
-            else emit(points[i], inner_side, outer);
+            if (outer_left) append_vertex_pair(points[i], outer, inner_side);
+            else append_vertex_pair(points[i], inner_side, outer);
         }
     }
     // Round end cap continues the same strip; alpha is composited only once.
@@ -211,7 +211,7 @@ inline std::vector<float> make_strip(const std::vector<Point>& input,
     for (int j = 1; j <= cap_sections; ++j) {
         const float angle = 1.57079632679f * static_cast<float>(j) / cap_sections;
         const float c = std::cos(angle), st = std::sin(angle);
-        emit(points.back(), {last_normal.x * c + last.x * st,
+        append_vertex_pair(points.back(), {last_normal.x * c + last.x * st,
                              last_normal.y * c + last.y * st},
                             {-last_normal.x * c + last.x * st,
                              -last_normal.y * c + last.y * st});
