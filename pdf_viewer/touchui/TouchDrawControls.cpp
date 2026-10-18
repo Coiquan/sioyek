@@ -1,8 +1,6 @@
 #include "touchui/TouchDrawControls.h"
 #include "utils.h"
 
-extern float HIGHLIGHT_COLORS[26 * 3];
-
 TouchDrawControls::TouchDrawControls(float pen_size, char selected_symbol, QWidget* parent) : QWidget(parent) {
 
     quick_widget = new QQuickWidget(this);
@@ -11,16 +9,7 @@ TouchDrawControls::TouchDrawControls(float pen_size, char selected_symbol, QWidg
     quick_widget->setAttribute(Qt::WA_AlwaysStackOnTop);
     quick_widget->setClearColor(Qt::transparent);
 
-    QList<QColor> colors;
-    const int N_COLORS = 26;
-    for (int i = 0; i < N_COLORS; i++) {
-        colors.push_back(convert_float3_to_qcolor(&HIGHLIGHT_COLORS[3 * i]));
-    }
-    //colors.push_back(convert_float3_to_qcolor(&HIGHLIGHT_COLORS[3 * ('b' - 'a')]));
-    //colors.push_back(convert_float3_to_qcolor(&HIGHLIGHT_COLORS[3 * ('c' - 'a')]));
-    //colors.push_back(convert_float3_to_qcolor(&HIGHLIGHT_COLORS[3 * ('d' - 'a')]));
-
-    quick_widget->rootContext()->setContextProperty("_colors", QVariant::fromValue(colors));
+    refresh_colors();
 
     quick_widget->rootContext()->setContextProperty("_index", selected_symbol - 'a');
     quick_widget->rootContext()->setContextProperty("_pen_size", pen_size);
@@ -85,6 +74,14 @@ TouchDrawControls::TouchDrawControls(float pen_size, char selected_symbol, QWidg
 
 
 }
+void TouchDrawControls::refresh_colors() {
+    QList<QColor> colors;
+    for (int i = 0; i < 6; ++i) {
+        colors.push_back(convert_float3_to_qcolor(get_draw_type_color('a' + i)));
+    }
+    quick_widget->rootContext()->setContextProperty("_colors", QVariant::fromValue(colors));
+}
+
 void TouchDrawControls::setDrawType(char type) {
     quick_widget->rootContext()->setContextProperty("_index", type - 'a');
 }

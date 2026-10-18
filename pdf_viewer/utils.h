@@ -248,6 +248,8 @@ QString android_file_uri_from_content_uri(QString uri);
 
 char get_highlight_color_type(float color[3]);
 float* get_highlight_type_color(char type);
+float* get_draw_type_color(char type);
+char get_draw_color_type(float color[3]);
 void lighten_color(float input[3], float output[3]);
 std::wstring clean_bib_item(std::wstring bib_item);
 std::wstring clean_link_source_text(std::wstring link_source_text);

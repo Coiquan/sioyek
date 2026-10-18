@@ -5572,9 +5572,10 @@ public:
 class SetFreehandType : public SymbolCommand {
 public:
     static inline const std::string cname = "set_freehand_type";
-    static inline const std::string hname = "Set the freehand drawing color type";
+    static inline const std::string hname = "Set the freehand drawing color (a-f)";
     SetFreehandType(MainWidget* w) : SymbolCommand(cname, w) {};
     void perform() {
+        if (symbol < 'a' || symbol > 'f') return;
         widget->current_freehand_type = symbol;
         widget->update_desktop_draw_toolbar();
     }

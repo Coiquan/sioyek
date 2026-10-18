@@ -9,9 +9,16 @@ int FONT_SIZE = -1;
 int STATUS_BAR_FONT_SIZE = -1;
 // Shared vertical thickness of Search/Comment and desktop drawing toolbar.
 int TOP_BAR_HEIGHT = 32;
-// Exactly five brush sizes and six palette letters (a-z) are shown.
+// Exactly five brush sizes and six independent drawing colors are shown.
 std::wstring DRAW_TOOLBAR_SIZES = L"1 2 3 5 8";
-std::wstring DRAW_TOOLBAR_COLORS = L"a b f o r y";
+float DRAW_COLORS[6 * 3] = {
+    0.94f, 0.64f, 1.00f,
+    0.00f, 0.46f, 0.86f,
+    0.00f, 0.36f, 0.19f,
+    1.00f, 0.64f, 0.02f,
+    1.00f, 0.00f, 0.06f,
+    1.00f, 1.00f, 0.00f
+};
 float BACKGROUND_COLOR[3] = { 0.97f, 0.97f, 0.97f };
 float DARK_MODE_BACKGROUND_COLOR[3] = { 0.0f, 0.0f, 0.0f };
 float CUSTOM_COLOR_MODE_EMPTY_BACKGROUND_COLOR[3] = { 0.0f, 0.0f, 0.0f };
@@ -1108,7 +1115,9 @@ ConfigManager::ConfigManager(const Path& default_path, const Path& auto_path, co
     add_string(L"annotations_directory", &ANNOTATIONS_DIR_PATH);
     add_string(L"status_bar_format", &STATUS_BAR_FORMAT);
     add_string(L"draw_toolbar_sizes", &DRAW_TOOLBAR_SIZES);
-    add_string(L"draw_toolbar_colors", &DRAW_TOOLBAR_COLORS);
+    for (int i = 0; i < 6; ++i) {
+        add_color3(L"draw_color_" + std::to_wstring(i + 1), &DRAW_COLORS[3 * i]);
+    }
     add_string(L"right_status_bar_format", &RIGHT_STATUS_BAR_FORMAT);
     add_string(L"epub_css", &EPUB_CSS);
     add_string(L"tag_font_face", &TAG_FONT_FACE);

@@ -47,6 +47,7 @@ qt_add_executable(sioyek WIN32 MACOSX_BUNDLE
     pdf_viewer/input.cpp pdf_viewer/input.h
     pdf_viewer/main.cpp
     pdf_viewer/main_widget.cpp pdf_viewer/main_widget.h
+    pdf_viewer/pen_input.cpp pdf_viewer/pen_input.h
     pdf_viewer/mysortfilterproxymodel.cpp pdf_viewer/mysortfilterproxymodel.h
     pdf_viewer/new_file_checker.cpp pdf_viewer/new_file_checker.h
     pdf_viewer/path.cpp pdf_viewer/path.h
@@ -144,6 +145,7 @@ else()
 endif()
 
 if(WIN32)
+  target_link_libraries(sioyek PRIVATE hid user32)
   target_compile_definitions(sioyek PRIVATE
         _CRT_SECURE_NO_WARNINGS
         _CRT_NONSTDC_NO_DEPRECATE

@@ -146,11 +146,9 @@ extern float VISUAL_MARK_NEXT_PAGE_FRACTION;
 extern float VISUAL_MARK_NEXT_PAGE_THRESHOLD;
 extern float SMALL_PIXMAP_SCALE;
 extern std::wstring EXECUTE_COMMANDS[26];
-extern float HIGHLIGHT_COLORS[26 * 3];
 extern int STATUS_BAR_FONT_SIZE;
 extern int TOP_BAR_HEIGHT;
 extern std::wstring DRAW_TOOLBAR_SIZES;
-extern std::wstring DRAW_TOOLBAR_COLORS;
 extern Path default_config_path;
 extern Path default_keys_path;
 extern std::vector<Path> user_config_paths;
@@ -1381,10 +1379,12 @@ MainWidget::MainWidget(fz_context* mupdf_context,
     set_color_mode_to_system_theme();
 #endif
 
+    initialize_windows_pen_input();
     setFocus();
 }
 
 MainWidget::~MainWidget() {
+    finish_tablet_tool();
     if (is_reading) {
         is_reading = false;
         get_tts()->stop();
@@ -1636,6 +1636,8 @@ std::wstring MainWidget::get_status_string(bool is_right) {
 }
 
 void MainWidget::handle_escape() {
+
+    finish_tablet_tool();
 
     // add high escape priority to overview and search, if any of them are escaped, do not escape any further
     if (opengl_widget) {
@@ -1914,6 +1916,7 @@ void MainWidget::move_document_screens(int num_screens) {
 void MainWidget::on_config_file_changed(ConfigManager* new_config) {
 
     update_desktop_draw_toolbar();
+    if (draw_controls_) draw_controls_->controls_ui->refresh_colors();
     update_top_bar_geometry();
     status_label->setStyleSheet(get_status_stylesheet());
     status_label->setFont(QFont(get_status_font_face_name()));
@@ -6922,6 +6925,23 @@ int MainWidget::num_visible_links() {
 
 bool MainWidget::event(QEvent* event) {
 
+    if (event->type() == PenInputEvent::event_type()) {
+        auto* pen = static_cast<PenInputEvent*>(event);
+        if (!opengl_widget) return true;
+        raw_pen_state_ = pen->state.in_range ? std::optional<PenInputState>(pen->state) : std::nullopt;
+        const bool in_viewport = opengl_widget->rect().contains(
+            opengl_widget->mapFromGlobal(pen->global_pos));
+        if (in_viewport || is_drawing || tablet_pen_tool_ != TabletPenTool::None) {
+            const bool handled = update_tablet_tool(pen->state, pen->global_pos);
+            if (is_drawing && !pen->state.tip_down) {
+                finish_drawing(opengl_widget->mapFromGlobal(pen->global_pos));
+                invalidate_render();
+            }
+            pen->setAccepted(handled);
+        }
+        return true;
+    }
+
     QTabletEvent* te = dynamic_cast<QTabletEvent*>(event);
     QKeyEvent* ke = dynamic_cast<QKeyEvent*>(event);
     if (ke && (ke->type() == QEvent::KeyPress)) {
@@ -6939,6 +6959,26 @@ bool MainWidget::event(QEvent* event) {
         if (is_scratchpad_mode()) {
             scratchpad->on_view_size_change(opengl_widget->width(), opengl_widget->height());
         }
+    }
+    if (event->type() == QEvent::WindowDeactivate) {
+        finish_tablet_tool();
+        raw_pen_state_ = {};
+    }
+    if (te && opengl_widget) {
+        const bool in_viewport = opengl_widget->rect().contains(
+            opengl_widget->mapFromGlobal(te->globalPos()));
+        if ((in_viewport || is_drawing || tablet_pen_tool_ != TabletPenTool::None) &&
+            handle_tablet_tool_event(te)) {
+            event->accept();
+            return true;
+        }
+    }
+    // Ignored tablet events let Qt synthesize mouse input for toolbars and
+    // other widgets. Only consume pen drawing events inside the PDF viewport.
+    if (te && opengl_widget && !is_drawing &&
+        !opengl_widget->rect().contains(opengl_widget->mapFromGlobal(te->globalPos()))) {
+        event->ignore();
+        return false;
     }
     if ((should_draw(true)) && te) {
         handle_pen_drawing_event(te);
@@ -8464,11 +8504,13 @@ void MainWidget::set_freehand_thickness(float val) {
 
 void MainWidget::handle_pen_drawing_event(QTabletEvent* te) {
 
-    if (te->type() == QEvent::TabletPress) {
+    if (te->type() == QEvent::TabletPress && te->button() == Qt::LeftButton) {
+        if (raw_pen_state_ && !raw_pen_state_->tip_down) return;
         start_drawing();
+        handle_drawing_move(to_pdf_viewport_pos(te->pos()), te->pressure());
     }
 
-    if (te->type() == QEvent::TabletRelease) {
+    if (te->type() == QEvent::TabletRelease && te->button() == Qt::LeftButton && is_drawing) {
         finish_drawing(to_pdf_viewport_pos(te->pos()));
         invalidate_render();
     }
@@ -8480,6 +8522,103 @@ void MainWidget::handle_pen_drawing_event(QTabletEvent* te) {
         }
 
     }
+}
+
+void MainWidget::finish_tablet_tool() {
+    if (tablet_pen_tool_ == TabletPenTool::None) return;
+    // Moving strokes are removed from their source when the drag begins.
+    // Commit at the last pen position even if the side button is released first.
+    if (freehand_drawing_move_data) {
+        handle_freehand_drawing_move_finish(tablet_pen_last_pos_);
+    }
+    selected_freehand_drawings = {};
+    opengl_widget->moving_drawings.clear();
+    opengl_widget->moving_pixmaps.clear();
+    opengl_widget->clear_selected_rectangle();
+    tablet_pen_rect_begin_ = {};
+    tablet_pen_tip_down_ = false;
+    tablet_pen_tool_ = TabletPenTool::None;
+    invalidate_render();
+}
+
+bool MainWidget::handle_tablet_tool_event(QTabletEvent* te) {
+    PenInputState state;
+    if (raw_pen_state_) {
+        state = *raw_pen_state_;
+    }
+    else {
+        state.lower_down = te->buttons().testFlag(Qt::RightButton);
+#ifdef SIOYEK_QT6
+        state.upper_down = te->pointerType() == QPointingDevice::PointerType::Eraser;
+#else
+        state.upper_down = te->pointerType() == QTabletEvent::Eraser;
+#endif
+        // Fallback for devices/platforms without Raw Input. Tool identity
+        // comes from Qt buttons/pointer type; pressure only indicates contact.
+        state.tip_down = te->pressure() > 0.0;
+    }
+    return update_tablet_tool(state, te->globalPos());
+}
+
+bool MainWidget::update_tablet_tool(const PenInputState& state, QPoint global_pos) {
+    if (!main_document_view_has_document()) return false;
+    const TabletPenTool tool = !state.in_range ? TabletPenTool::None :
+        state.upper_down ? TabletPenTool::Erase :
+        state.lower_down ? TabletPenTool::Move : TabletPenTool::None;
+    if (tool == TabletPenTool::None && tablet_pen_tool_ == TabletPenTool::None) return false;
+
+    const QPoint pos = opengl_widget->mapFromGlobal(global_pos);
+    const AbsoluteDocumentPos abs_pos = get_window_abspos(WindowPos(pos));
+    if (tablet_pen_tool_ != TabletPenTool::None) tablet_pen_last_pos_ = abs_pos;
+    if (tool != tablet_pen_tool_) {
+        const bool was_active = tablet_pen_tool_ != TabletPenTool::None;
+        finish_tablet_tool();
+        if (tool == TabletPenTool::None) return was_active;
+        // Leave other commands and reading interactions alone. These tools
+        // temporarily override drawing, without changing the drawing mode.
+        if (!should_draw(true) || pending_command_instance || is_menu_focused()) return false;
+        if (is_drawing) {
+            finish_drawing(pos);
+        }
+        tablet_pen_tool_ = tool;
+        tablet_pen_last_pos_ = abs_pos;
+    }
+    if (tablet_pen_tool_ == TabletPenTool::None) return false;
+
+    const bool tip_down = state.tip_down;
+    if (tip_down && !tablet_pen_tip_down_) {
+        if (tool == TabletPenTool::Move && selected_freehand_drawings &&
+            selected_freehand_drawings->selection_absrect.contains(abs_pos)) {
+            handle_freehand_drawing_selection_click(abs_pos);
+        }
+        else {
+            selected_freehand_drawings = {};
+            opengl_widget->moving_drawings.clear();
+            opengl_widget->moving_pixmaps.clear();
+            tablet_pen_rect_begin_ = abs_pos;
+        }
+    }
+
+    if (freehand_drawing_move_data) {
+        opengl_widget->moving_drawings.clear();
+        opengl_widget->moving_pixmaps.clear();
+        move_selected_drawings(abs_pos, opengl_widget->moving_drawings, opengl_widget->moving_pixmaps);
+        if (!tip_down) handle_freehand_drawing_move_finish(abs_pos);
+    }
+    else if (tablet_pen_rect_begin_) {
+        AbsoluteRect rect(tablet_pen_rect_begin_.value(), abs_pos);
+        if (rect.x0 > rect.x1) std::swap(rect.x0, rect.x1);
+        if (rect.y0 > rect.y1) std::swap(rect.y0, rect.y1);
+        opengl_widget->set_selected_rectangle(rect);
+        if (!tip_down) {
+            if (tool == TabletPenTool::Move) select_freehand_drawings(rect);
+            else delete_freehand_drawings(rect);
+            tablet_pen_rect_begin_ = {};
+        }
+    }
+    tablet_pen_tip_down_ = tip_down;
+    invalidate_render();
+    return true;
 }
 
 void MainWidget::handle_drawing_move(QPoint pos, float pressure) {
@@ -9247,6 +9386,10 @@ void MainWidget::handle_freehand_drawing_move_finish() {
     QPoint p = to_pdf_viewport_pos(mapFromGlobal(QCursor::pos()));
     //AbsoluteDocumentPos mpos_absolute = main_document_view->window_to_absolute_document_pos({ p.x(), p.y() });
     AbsoluteDocumentPos mpos_absolute = get_window_abspos({ p.x(), p.y() });
+    handle_freehand_drawing_move_finish(mpos_absolute);
+}
+
+void MainWidget::handle_freehand_drawing_move_finish(AbsoluteDocumentPos mpos_absolute) {
     std::vector<FreehandDrawing> moved_drawings;
     std::vector<PixmapDrawing> moved_pixmaps;
 
@@ -11005,6 +11148,7 @@ DocumentView* MainWidget::dv() {
 
 bool MainWidget::should_draw(bool originated_from_pen) {
 
+    if (tablet_pen_tool_ != TabletPenTool::None) return false;
     if (rect_select_mode) return false;
     if (freehand_drawing_move_data || selected_freehand_drawings) return false;
 
@@ -11316,7 +11460,7 @@ void MainWidget::create_desktop_draw_toolbar() {
     desktop_draw_toolbar_->addWidget(color_label);
     auto* colors = new QActionGroup(desktop_draw_toolbar_);
     colors->setExclusive(false);
-    // Exactly six color slots; config supplies palette indices, not slot count.
+    // Six independent drawing colors, addressed by types a-f.
     for (int i = 0; i < 6; ++i) {
         QAction* action = desktop_draw_toolbar_->addAction(QString());
         action->setCheckable(true);
@@ -11357,7 +11501,7 @@ void MainWidget::update_desktop_draw_toolbar() {
     desktop_save_action_->setEnabled(doc() != nullptr);
     desktop_load_action_->setEnabled(doc() != nullptr);
 
-    // A malformed preset list falls back to its built-in five/six entries.
+    // A malformed size preset list falls back to its five built-in entries.
     std::array<float, 5> sizes{{ 1, 2, 3, 5, 8 }};
     {
         std::wistringstream ss(DRAW_TOOLBAR_SIZES);
@@ -11379,31 +11523,14 @@ void MainWidget::update_desktop_draw_toolbar() {
         action->setChecked(std::abs(size - freehand_thickness) < 0.01f);
     }
 
-    std::array<char, 6> color_symbols{{ 'a', 'b', 'f', 'o', 'r', 'y' }};
-    {
-        // Both "abfory" and "a b f o r y" are accepted.
-        std::array<char, 6> parsed{};
-        size_t count = 0;
-        bool valid = true;
-        for (wchar_t ch : DRAW_TOOLBAR_COLORS) {
-            if (ch == L' ' || ch == L'\t') continue;
-            if (ch < L'a' || ch > L'z' || count >= parsed.size()) {
-                valid = false;
-                break;
-            }
-            parsed[count++] = static_cast<char>(ch);
-        }
-        if (valid && count == parsed.size()) color_symbols = parsed;
-    }
     for (size_t i = 0; i < desktop_color_actions_.size(); ++i) {
         QAction* action = desktop_color_actions_[i];
-        const char type = color_symbols[i];
+        const char type = 'a' + static_cast<char>(i);
         action->setData(QChar::fromLatin1(type));
         action->setText(QString()); // Show the swatch only, never its letter.
-        action->setToolTip(tr("Drawing color %1").arg(QChar::fromLatin1(type).toUpper()));
+        action->setToolTip(tr("Drawing color %1").arg(static_cast<int>(i) + 1));
         action->setChecked(current_freehand_type == type);
-        const int index = type - 'a';
-        const float* rgb = &HIGHLIGHT_COLORS[3 * index];
+        const float* rgb = get_draw_type_color(type);
         // Render the color disc at device resolution for sharp HiDPI icons.
         const qreal dpr = std::max<qreal>(1.0, desktop_draw_toolbar_->devicePixelRatioF());
         constexpr int icon_size = 22;

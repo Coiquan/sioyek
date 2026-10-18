@@ -11,20 +11,20 @@ Item{
     signal colorHeld(int index)
 
     Repeater{
-        model: 26
+        model: root.colors.length
 
         Rectangle{
             required property int index
             anchors.top: get_top_anchor()
             anchors.bottom: get_bottom_anchor()
 
-            width: is_too_small() ? parent.width / 13 : parent.width / 26
-            x: is_too_small() ?  (visible ? (index % 13) * width : root.width / 2 - width / 2) : (visible ? index * width : root.width / 2 - width / 2)
+            width: is_too_small() ? parent.width / Math.ceil(root.colors.length / 2) : parent.width / root.colors.length
+            x: is_too_small() ?  (visible ? (index % Math.ceil(root.colors.length / 2)) * width : root.width / 2 - width / 2) : (visible ? index * width : root.width / 2 - width / 2)
             color: root.colors[index]
 
             function get_top_anchor(){
                 if (is_too_small()){
-                    if (index < 13){
+                    if (index < Math.ceil(root.colors.length / 2)){
                         return parent.top;
                     }
                     else{
@@ -37,7 +37,7 @@ Item{
             }
             function get_bottom_anchor(){
                 if (is_too_small()){
-                    if (index < 13){
+                    if (index < Math.ceil(root.colors.length / 2)){
                         return parent.verticalCenter;
                     }
                     else{
@@ -50,7 +50,7 @@ Item{
 
             }
             function is_too_small(){
-                return root.width / 26 < 20;
+                return root.width / root.colors.length < 20;
             }
 
             Behavior on x {
@@ -64,7 +64,7 @@ Item{
             Text{
                 anchors.centerIn: parent
                 text: String.fromCharCode(97 + index)
-                color: _colors[index].hslLightness > 0.5 ? "black" : "white"
+                color: root.colors[index].hslLightness > 0.5 ? "black" : "white"
             }
             MouseArea {
                 anchors.fill: parent

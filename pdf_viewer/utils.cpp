@@ -6,6 +6,7 @@
 #endif
 
 #include <cmath>
+#include <limits>
 #include <cassert>
 #include "utils.h"
 #include <optional>
@@ -60,6 +61,7 @@ extern float EPUB_HEIGHT;
 extern float EPUB_FONT_SIZE;
 extern std::wstring EPUB_CSS;
 extern float HIGHLIGHT_COLORS[26 * 3];
+extern float DRAW_COLORS[6 * 3];
 extern float BLACK_COLOR[3];
 extern bool PAPER_DOWNLOAD_AUTODETECT_PAPER_NAME;
 
@@ -3169,6 +3171,24 @@ char get_highlight_color_type(float color[3]) {
         }
     }
 
+    return 'a' + min_index;
+}
+
+float* get_draw_type_color(char type) {
+    const int index = type >= 'a' && type <= 'f' ? type - 'a' : 0;
+    return &DRAW_COLORS[3 * index];
+}
+
+char get_draw_color_type(float color[3]) {
+    float min_distance = std::numeric_limits<float>::max();
+    int min_index = 0;
+    for (int i = 0; i < 6; ++i) {
+        const float distance = vec3_distance_squared(color, &DRAW_COLORS[3 * i]);
+        if (distance < min_distance) {
+            min_distance = distance;
+            min_index = i;
+        }
+    }
     return 'a' + min_index;
 }
 

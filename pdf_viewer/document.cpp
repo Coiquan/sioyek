@@ -32,7 +32,6 @@ const int WINDOW_SIZE = 10;
 const int EMBEDDING_DIM = 10;
 
 extern float SMALL_PIXMAP_SCALE;
-extern float HIGHLIGHT_COLORS[26 * 3];
 extern std::wstring TEXT_HIGHLIGHT_URL;
 extern bool TEXT_SUMMARY_HIGHLIGHT_SHOULD_REFINE;
 extern bool TEXT_SUMMARY_HIGHLIGHT_SHOULD_FILL;
@@ -2119,7 +2118,7 @@ void Document::get_pdf_annotations(std::vector<BookMark>& pdf_bookmarks, std::ve
                     int n_channels;
                     float color[4];
                     pdf_annot_color(context, annot, &n_channels, color);
-                    char type = get_highlight_color_type(color);
+                    char type = get_draw_color_type(color);
                     float thickness = pdf_annot_border(context, annot);
                     drawing.type = type;
 
@@ -2614,9 +2613,7 @@ void Document::embed_annotations(std::wstring new_file_path) {
             int count[1] = { static_cast<int>(points.size()) };
             pdf_set_annot_border(context, drawing_annot, drawing.points[0].thickness);
             pdf_set_annot_ink_list(context, drawing_annot, 1, count, &points[0]);
-            if (drawing.type >= 'a' && drawing.type <= 'z') {
-                pdf_set_annot_color(context, drawing_annot, 3, &HIGHLIGHT_COLORS[3 * (drawing.type - 'a')]);
-            }
+            pdf_set_annot_color(context, drawing_annot, 3, get_draw_type_color(drawing.type));
             pdf_update_annot(context, drawing_annot);
         }
     }

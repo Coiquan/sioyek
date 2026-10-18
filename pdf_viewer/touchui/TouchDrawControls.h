@@ -14,6 +14,7 @@ public:
     TouchDrawControls(float pen_size, char selected_symbol, QWidget* parent = nullptr);
     void resizeEvent(QResizeEvent* resize_event) override;
     void setDrawType(char type);
+    void refresh_colors();
     void set_pen_size(float size);
     void set_scratchpad_mode(bool mode);
 

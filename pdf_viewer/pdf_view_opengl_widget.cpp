@@ -3082,12 +3082,12 @@ void PdfViewOpenGLWidget::render_compiled_drawings() {
     //res.y = (-abs.y + offset_y) / half_height;
     // res.x = abs.x / half_width + offset_x / half_width
     //return res;
-    float mode_highlight_colors[26 * 3];
+    float mode_drawing_colors[26 * 3];
     for (int i = 0; i < 26; i++) {
-        auto res = cc3(&HIGHLIGHT_COLORS[3 * i]);
-        mode_highlight_colors[i * 3 + 0] = res[0];
-        mode_highlight_colors[i * 3 + 1] = res[1];
-        mode_highlight_colors[i * 3 + 2] = res[2];
+        auto res = cc3(get_draw_type_color('a' + i));
+        mode_drawing_colors[i * 3 + 0] = res[0];
+        mode_drawing_colors[i * 3 + 1] = res[1];
+        mode_drawing_colors[i * 3 + 2] = res[2];
     }
 
     if (scratchpad->cached_compiled_drawing_data.has_value()) {
@@ -3115,7 +3115,7 @@ void PdfViewOpenGLWidget::render_compiled_drawings() {
         glUseProgram(shared_gl_objects.compiled_drawing_program);
         glUniform2fv(shared_gl_objects.compiled_drawing_offset_uniform_location, 1, offset);
         glUniform2fv(shared_gl_objects.compiled_drawing_scale_uniform_location, 1, scale);
-        glUniform3fv(shared_gl_objects.compiled_drawing_colors_uniform_location, 26, mode_highlight_colors);
+        glUniform3fv(shared_gl_objects.compiled_drawing_colors_uniform_location, 26, mode_drawing_colors);
         //glUniform4fv(shared_gl_objects.compiled_drawing_color_uniform_location, 1, color);
         glEnable(GL_PRIMITIVE_RESTART_FIXED_INDEX);
         glDrawElements(GL_TRIANGLE_STRIP, scratchpad->cached_compiled_drawing_data->n_elements, GL_UNSIGNED_INT, 0);
@@ -3138,7 +3138,7 @@ void PdfViewOpenGLWidget::render_compiled_drawings() {
         glUseProgram(shared_gl_objects.compiled_dots_program);
         glUniform2fv(shared_gl_objects.compiled_dot_offset_uniform_location, 1, offset);
         glUniform2fv(shared_gl_objects.compiled_dot_scale_uniform_location, 1, scale);
-        glUniform3fv(shared_gl_objects.compiled_dot_color_uniform_location, 26, mode_highlight_colors);
+        glUniform3fv(shared_gl_objects.compiled_dot_color_uniform_location, 26, mode_drawing_colors);
 
         glEnable(GL_BLEND);
         glDrawElements(GL_TRIANGLE_STRIP, scratchpad->cached_compiled_drawing_data->n_dot_elements, GL_UNSIGNED_INT, 0);
@@ -3183,9 +3183,8 @@ void PdfViewOpenGLWidget::render_drawings(DocumentView* dv, const std::vector<Fr
             continue;
         }
 
-        float current_drawing_color_[4] = { HIGHLIGHT_COLORS[(drawing.type - 'a') * 3],
-            HIGHLIGHT_COLORS[(drawing.type - 'a') * 3 + 1],
-             HIGHLIGHT_COLORS[(drawing.type - 'a') * 3 + 2],
+        const float* rgb = get_draw_type_color(drawing.type);
+        float current_drawing_color_[4] = { rgb[0], rgb[1], rgb[2],
             drawing.alpha
         };
         float current_drawing_color[4] = {0};
