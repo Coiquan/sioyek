@@ -933,6 +933,46 @@ void DocumentView::fit_to_page_height(bool smart, int statusbar_height) {
     int cp = get_center_page_number();
     if (cp == -1) return;
 
+    // Smart height fitting in two-page mode must account for both pages. The
+    // spread is centered on virtual x=0; converting from a page-local absolute
+    // x coordinate here would shift the gutter away from the viewport center.
+    if (smart && two_page_mode) {
+        const int obscured_height = std::clamp(statusbar_height, 0, std::max(0, view_height - 1));
+        const int available_height = std::max(1, view_height - obscured_height - 2 * FIT_TO_PAGE_HEIGHT_MARGIN);
+        const int other_page = cp + ((cp + static_cast<int>(recto_verso_adjustment_)) % 2 ? -1 : 1);
+
+        float content_top = 0.0f;
+        float content_bottom = 0.0f;
+        bool has_content = false;
+        for (int page : {cp, other_page}) {
+            if (page < 0 || page >= current_document->num_pages()) {
+                continue;  // Cover / final page without a facing page.
+            }
+            float top_ratio, bottom_ratio;
+            int full_height;
+            current_document->get_page_size_smart(false, page, &top_ratio, &bottom_ratio, &full_height);
+            const float top = top_ratio * full_height;
+            const float bottom = bottom_ratio * full_height;
+            if (!has_content) {
+                content_top = top;
+                content_bottom = bottom;
+                has_content = true;
+            }
+            else {
+                content_top = std::min(content_top, top);
+                content_bottom = std::max(content_bottom, bottom);
+            }
+        }
+
+        const float content_height = std::max(1.0f, content_bottom - content_top);
+        set_zoom_level(static_cast<float>(available_height) / content_height, true);
+        fill_cached_virtual_rects();
+        offset.x = 0.0f;  // Keep the spread gutter at the viewport center.
+        offset.y = cached_virtual_rects[cp].y0 + (content_top + content_bottom) / 2.0f
+            + obscured_height / (2.0f * get_zoom_level());
+        return;
+    }
+
     float top_ratio, bottom_ratio;
     int normal_page_height;
     int page_height = current_document->get_page_size_smart(false, cp, &top_ratio, &bottom_ratio, &normal_page_height);
