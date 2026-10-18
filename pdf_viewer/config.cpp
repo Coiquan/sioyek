@@ -7,8 +7,8 @@
 
 int FONT_SIZE = -1;
 int STATUS_BAR_FONT_SIZE = -1;
-// Shared width for the Search/Comment prompt and the desktop drawing toolbar.
-float TOP_BAR_WIDTH_RATIO = 1.0f;
+// Shared vertical thickness of Search/Comment and desktop drawing toolbar.
+int TOP_BAR_HEIGHT = 32;
 // Exactly five brush sizes and six palette letters (a-z) are shown.
 std::wstring DRAW_TOOLBAR_SIZES = L"1 2 3 5 8";
 std::wstring DRAW_TOOLBAR_COLORS = L"a b f o r y";
@@ -37,6 +37,11 @@ float TEXT_SELECTION_MINIMUM_DISTANCE = 5;
 bool SCROLL_PAST_DOCUMENT_ENDS = true;
 bool HORIZONTAL_SCROLL_PAST_PAGE_ENDS = false;
 bool SIMPLIFY_FREEHAND_DRAWINGS = true;
+// These defaults favour low latency and can be overridden in prefs_user.config.
+float FREEHAND_INPUT_SMOOTHING = 0.20f;
+float FREEHAND_PRESSURE_MIN_WIDTH = 0.40f;
+float FREEHAND_PRESSURE_GAMMA = 1.25f;
+int FREEHAND_MSAA_SAMPLES = 8;
 bool RECTO_VERSO_ADJUSTMENT = false;
 bool KEYBOARD_SELECT_INCLUSIVE = false;
 bool SHOW_COMMAND_HINTS = false;
@@ -944,7 +949,7 @@ ConfigManager::ConfigManager(const Path& default_path, const Path& auto_path, co
     add_float(L"vertical_move_amount", &VERTICAL_MOVE_AMOUNT, FloatExtras{0.1f, 10.0f});
     add_float(L"horizontal_move_amount", &HORIZONTAL_MOVE_AMOUNT, FloatExtras{0.1f, 10.0f});
     add_float(L"move_screen_percentage", &MOVE_SCREEN_PERCENTAGE, FloatExtras{0.0f, 1.0f});
-    add_float(L"top_bar_width_ratio", &TOP_BAR_WIDTH_RATIO, FloatExtras{0.3f, 1.0f});
+    add_int(L"top_bar_height", &TOP_BAR_HEIGHT, IntExtras{28, 100});
     add_float(L"strike_line_width", &STRIKE_LINE_WIDTH, FloatExtras{0.0f, 10.0f});
     add_float(L"move_screen_ratio", &MOVE_SCREEN_PERCENTAGE, FloatExtras{0.0f, 1.0f});
     add_float(L"visual_mark_next_page_fraction", &VISUAL_MARK_NEXT_PAGE_FRACTION, FloatExtras{-2.0f, 2.0f});
@@ -1064,6 +1069,10 @@ ConfigManager::ConfigManager(const Path& default_path, const Path& auto_path, co
     add_bool(L"horizontal_scroll_past_page_ends", &HORIZONTAL_SCROLL_PAST_PAGE_ENDS);
     add_bool(L"uniform_page_widths", &SAME_WIDTH);
     add_bool(L"simplify_freehand_drawings", &SIMPLIFY_FREEHAND_DRAWINGS);
+    add_float(L"freehand_input_smoothing", &FREEHAND_INPUT_SMOOTHING, FloatExtras{0.0f, 0.85f});
+    add_float(L"freehand_pressure_min_width", &FREEHAND_PRESSURE_MIN_WIDTH, FloatExtras{0.05f, 1.0f});
+    add_float(L"freehand_pressure_gamma", &FREEHAND_PRESSURE_GAMMA, FloatExtras{0.2f, 4.0f});
+    add_int(L"freehand_msaa_samples", &FREEHAND_MSAA_SAMPLES, IntExtras{0, 16});
     add_bool(L"recto_verso_adjustment", &RECTO_VERSO_ADJUSTMENT);
     add_bool(L"keyboard_select_inclusive", &KEYBOARD_SELECT_INCLUSIVE);
     add_bool(L"show_command_hints", &SHOW_COMMAND_HINTS);

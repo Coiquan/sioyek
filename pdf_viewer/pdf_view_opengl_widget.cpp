@@ -26,6 +26,7 @@
 
 extern bool DEBUG_DISPLAY_FREEHAND_POINTS;
 extern bool DEBUG_SMOOTH_FREEHAND_DRAWINGS;
+extern int FREEHAND_MSAA_SAMPLES;
 extern Path shader_path;
 extern float GAMMA;
 extern float BACKGROUND_COLOR[3];
@@ -176,31 +177,6 @@ GLfloat rotation_uvs[4][8] = {
 };
 
 OpenGLSharedResources PdfViewOpenGLWidget::shared_gl_objects;
-
-void generate_bezier_with_endpoints_and_velocity(
-    Vec<float, 2> p0, 
-    Vec<float, 2> p1, 
-    Vec<float, 2> v0, 
-    Vec<float, 2> v1, 
-    int n_points,
-    float thickness,
-    std::vector<FreehandDrawingPoint>& output
-    ) {
-    float alpha = 1.0f / n_points;
-    auto q0 = p0;
-    auto q1 = v0;
-    auto q2 = (p1 - p0) * 3 - v0 * 2 - v1;
-    auto q3 = (p0 - p1) * 2 + v0 + v1;
-
-    for (int i = 0; i < n_points; i++) {
-        float t = alpha * i;
-        float tt = t * t;
-        float ttt = tt * t;
-        Vec<float, 2> point = q0 + q1 *t + q2 * tt + q3 * ttt;
-        output.push_back(FreehandDrawingPoint{AbsoluteDocumentPos{point.x(), point.y()}, thickness});
-    }
-
-}
 
 bool num_slices_for_page_rect(PagelessDocumentRect page_rect, int* h_slices, int* v_slices) {
     /*
@@ -773,7 +749,7 @@ PdfViewOpenGLWidget::PdfViewOpenGLWidget(DocumentView* document_view, PdfRendere
 #endif
     //    format.setSwapBehavior(QSurfaceFormat::SwapBehavior::SingleBuffer);
     //    format.setSwapInterval(0);
-    format.setSamples(4);
+    format.setSamples(FREEHAND_MSAA_SAMPLES);
     format.setProfile(QSurfaceFormat::CoreProfile);
     this->setFormat(format);
 
@@ -2876,67 +2852,19 @@ void PdfViewOpenGLWidget::add_coordinates_for_window_point(DocumentView* dv, flo
     }
 }
 
-template<typename T>
-T lerp(T p1, T p2, float alpha) {
-    float x = p1.x + alpha * (p2.x - p1.x);
-    float y = p1.y + alpha * (p2.y - p1.y);
-    return T{ x, y };
-}
-
-template<typename T>
-T bezier_lerp(T p1, T p2, T p3, T p4, float alpha) {
-    T q1 = lerp(p1, p2, alpha);
-    T q2 = lerp(p2, p3, alpha);
-    T q3 = lerp(p3, p4, alpha);
-
-    T r1 = lerp(q1, q2, alpha);
-    T r2 = lerp(q2, q3, alpha);
-    return lerp(r1, r2, alpha);
-}
-
-
-FreehandDrawing smoothen_drawing(FreehandDrawing original) {
-    if (original.points.size() < 3) {
-        return original;
-    }
-
-    std::vector<Vec<float, 2>> velocities_at_points;
-    velocities_at_points.reserve(original.points.size());
-
-    velocities_at_points.push_back(original.points[1].pos - original.points[0].pos);
-
-    for (int i = 1; i < original.points.size()-1; i++) {
-        float alpha = 0.5f;
-        velocities_at_points.push_back((original.points[i+1].pos - original.points[i - 1].pos) * alpha);
-    }
-    velocities_at_points.push_back(original.points[original.points.size()-1].pos - original.points[original.points.size()-2].pos);
-
-    int N_POINTS = 4;
-    FreehandDrawing smoothed_drawing;
-    smoothed_drawing.creattion_time = original.creattion_time;
-    smoothed_drawing.type = original.type;
-    smoothed_drawing.alpha = original.alpha;
-    smoothed_drawing.points.reserve((original.points.size()-1) * N_POINTS);
-
-    for (int i = 0; i < original.points.size()-1; i++){
-        generate_bezier_with_endpoints_and_velocity(
-            original.points[i].pos,
-            original.points[i + 1].pos,
-            velocities_at_points[i],
-            velocities_at_points[i + 1],
-            N_POINTS,
-            original.points[i].thickness,
-            smoothed_drawing.points
-        );
-        /* for (auto p : bezier_curve) { */
-        /*     smoothed_drawing.points.push_back(FreehandDrawingPoint{ AbsoluteDocumentPos{ p.x(), p.y() }, original.points[i].thickness}); */
-        /* } */
-    }
-    // The Hermite interpolation loop emits points in [0, 1), so retain the
-    // actual final sample (including its thickness) for the end cap.
-    smoothed_drawing.points.push_back(original.points.back());
-    return smoothed_drawing;
-
+FreehandDrawing smoothen_drawing(FreehandDrawing original, float pixels_per_unit) {
+    if (original.points.size() < 3) return original;
+    std::vector<sioyek_stroke_mesh::Point> input;
+    input.reserve(original.points.size());
+    for (const auto& p : original.points)
+        input.push_back({p.pos.x, p.pos.y, p.thickness});
+    const auto smoothed = sioyek_stroke_mesh::smooth_curve(
+        input, pixels_per_unit, pixels_per_unit);
+    original.points.clear();
+    original.points.reserve(smoothed.size());
+    for (const auto& p : smoothed)
+        original.points.push_back({AbsoluteDocumentPos{p.x, p.y}, p.thickness});
+    return original;
 }
 
 void PdfViewOpenGLWidget::compile_drawings(DocumentView* dv, const std::vector<FreehandDrawing>& drawings) {
@@ -3006,7 +2934,7 @@ void PdfViewOpenGLWidget::compile_drawings(DocumentView* dv, const std::vector<F
 
     for (auto drawing : drawings) {
         if (DEBUG_SMOOTH_FREEHAND_DRAWINGS) {
-            drawing = smoothen_drawing(drawing);
+            drawing = smoothen_drawing(drawing, std::max(0.01f, dv->get_zoom_level()));
         }
 
         if (drawing.points.size() <= 0) {
@@ -3036,8 +2964,6 @@ void PdfViewOpenGLWidget::compile_drawings(DocumentView* dv, const std::vector<F
             add_point_coords(drawing.points.front(), drawing.type - 'a');
             continue;
         }
-        add_point_coords(drawing.points.front(), drawing.type - 'a');
-        add_point_coords(drawing.points.back(), drawing.type - 'a');
         for (size_t k = 0; k < stroke_vertices.size(); k += 2) {
             coordinates.push_back(stroke_vertices[k]);
             coordinates.push_back(stroke_vertices[k + 1]);
@@ -3226,9 +3152,14 @@ void PdfViewOpenGLWidget::render_drawings(DocumentView* dv, const std::vector<Fr
     if (drawings.size() == 0) return;
 
     glEnable(GL_BLEND);
-    glBlendFuncSeparate(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA, GL_ONE, GL_ONE);
-    glEnable(GL_DEPTH_TEST);
-    glClear(GL_DEPTH_BUFFER_BIT);
+    // Standard straight-alpha composition: destination alpha must not be
+    // added unconditionally on repeated semitransparent strokes.
+    glBlendFuncSeparate(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA,
+                        GL_ONE, GL_ONE_MINUS_SRC_ALPHA);
+    // All ink vertices have the same depth. Depth testing would silently
+    // discard intersections between separate semi-transparent strokes.
+    // The capsule/rounded joins are now one continuous non-overlapping strip.
+    glDisable(GL_DEPTH_TEST);
 
     float time_diff = last_scratchpad_update_datetime.msecsTo(QDateTime::currentDateTime());
     last_scratchpad_update_datetime = QDateTime::currentDateTime();
@@ -3242,11 +3173,8 @@ void PdfViewOpenGLWidget::render_drawings(DocumentView* dv, const std::vector<Fr
         auto drawing = drawings[i];
 
         if (DEBUG_SMOOTH_FREEHAND_DRAWINGS) {
-            drawing = smoothen_drawing(drawing);
+            drawing = smoothen_drawing(drawing, std::max(0.01f, dv->get_zoom_level()));
         }
-        //if (drawings.size() % 2 == 0){
-        //    drawing = smoothen_drawing(drawing);
-        //}
 
         if (drawing.points.size() <= 0) {
             continue;
@@ -3332,24 +3260,8 @@ void PdfViewOpenGLWidget::render_drawings(DocumentView* dv, const std::vector<Fr
                          static_cast<GLsizei>(coordinates.size() / 2));
         }
 
-        // Round caps for both ends. The circle data includes its center at
-        // vertex zero, so GL_TRIANGLE_FAN must also start at zero.
-        std::vector<float> cap_coordinates;
-        const float start_diameter = drawing.points.front().thickness * 2.0f * highlight_factor;
-        const float end_diameter = drawing.points.back().thickness * 2.0f * highlight_factor;
-        add_coordinates_for_window_point(dv, window_positions.front().x,
-                                         window_positions.front().y, start_diameter,
-                                         N_POINT_VERTICES, cap_coordinates);
-        bind_points(cap_coordinates);
-        glDrawArrays(GL_TRIANGLE_FAN, 0,
-                     static_cast<GLsizei>(cap_coordinates.size() / 2));
-        cap_coordinates.clear();
-        add_coordinates_for_window_point(dv, window_positions.back().x,
-                                         window_positions.back().y, end_diameter,
-                                         N_POINT_VERTICES, cap_coordinates);
-        bind_points(cap_coordinates);
-        glDrawArrays(GL_TRIANGLE_FAN, 0,
-                     static_cast<GLsizei>(cap_coordinates.size() / 2));
+        // The start/end caps and rounded joins are already part of the
+        // triangle strip. Separate fans would double-blend translucent ends.
 
         //for (auto coords : all_point_coordinates) {
         //    bind_points(coords);

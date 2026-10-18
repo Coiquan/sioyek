@@ -1024,7 +1024,6 @@ public:
     void update_desktop_draw_toolbar();
     void update_top_bar_geometry();
     void hide_textbar_and_restore_draw_toolbar();
-    int get_top_bar_width() const;
     QPoint to_pdf_viewport_pos(QPoint window_pos) const;
     PaperDownloadFinishedAction get_default_paper_download_finish_action();
     QString get_paper_download_finish_action_string(PaperDownloadFinishedAction action);

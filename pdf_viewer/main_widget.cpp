@@ -14,6 +14,7 @@
 
 
 #include "coordinates.h"
+#include "stroke_mesh.h"
 #include <iostream>
 #include <vector>
 #include <string>
@@ -73,6 +74,7 @@
 #include <qtextdocumentfragment.h>
 #include <qmenubar.h>
 #include <qtoolbar.h>
+#include <qtoolbutton.h>
 #include <qaction.h>
 #include <qsizepolicy.h>
 #include <qpen.h>
@@ -146,7 +148,7 @@ extern float SMALL_PIXMAP_SCALE;
 extern std::wstring EXECUTE_COMMANDS[26];
 extern float HIGHLIGHT_COLORS[26 * 3];
 extern int STATUS_BAR_FONT_SIZE;
-extern float TOP_BAR_WIDTH_RATIO;
+extern int TOP_BAR_HEIGHT;
 extern std::wstring DRAW_TOOLBAR_SIZES;
 extern std::wstring DRAW_TOOLBAR_COLORS;
 extern Path default_config_path;
@@ -238,6 +240,9 @@ extern bool RESTORE_ALL_WINDOWS_ON_STARTUP;
 
 extern bool FREE_TOUCHPAD_MOVEMENT;
 extern bool SIMPLIFY_FREEHAND_DRAWINGS;
+extern float FREEHAND_INPUT_SMOOTHING;
+extern float FREEHAND_PRESSURE_MIN_WIDTH;
+extern float FREEHAND_PRESSURE_GAMMA;
 extern bool SHOW_RIGHT_CLICK_CONTEXT_MENU;
 extern bool RIGHT_CLICK_MODE_MENU;
 extern std::wstring CONTEXT_MENU_ITEMS;
@@ -512,8 +517,7 @@ void MainWidget::resizeEvent(QResizeEvent* resize_event) {
 
     int status_bar_height = get_status_bar_height();
 
-    // The Search/Comment prompt has its own height; the drawing row must
-    // never force it to become taller.
+    // Search/Comment and the drawing toolbar share the configured thickness.
     update_top_bar_geometry();
 
     if (status_label != nullptr) {
@@ -1310,15 +1314,7 @@ MainWidget::MainWidget(fz_context* mupdf_context,
     layout->setSpacing(0);
     layout->setContentsMargins(0, 0, 0, 0);
     opengl_widget->setAttribute(Qt::WA_TransparentForMouseEvents);
-    // The outer row occupies the viewport width. Its toolbar does not:
-    // both this row and the Search/Comment prompt use top_bar_width_ratio.
-    auto* draw_toolbar_row = new QHBoxLayout;
-    draw_toolbar_row->setSpacing(0);
-    draw_toolbar_row->setContentsMargins(0, 0, 0, 0);
-    draw_toolbar_row->addStretch();
-    draw_toolbar_row->addWidget(desktop_draw_toolbar_);
-    draw_toolbar_row->addStretch();
-    layout->addLayout(draw_toolbar_row);
+    layout->addWidget(desktop_draw_toolbar_);
     layout->addLayout(hlayout);
 
 #ifdef SIOYEK_ANDROID
@@ -8487,24 +8483,37 @@ void MainWidget::handle_pen_drawing_event(QTabletEvent* te) {
 }
 
 void MainWidget::handle_drawing_move(QPoint pos, float pressure) {
-    pressure = 0;
     WindowPos current_window_pos = { pos.x(), pos.y() };
     AbsoluteDocumentPos mouse_abspos = get_window_abspos(current_window_pos);
-    FreehandDrawingPoint fdp;
-    fdp.pos = mouse_abspos;
+    auto& points = opengl_widget->current_drawing.points;
     float thickness_zoom_factor = 1.0f;
-
     if (opengl_widget->get_scratchpad()) {
         thickness_zoom_factor = 1.0f / dv()->get_zoom_level() * 3;
     }
-
-    if (pressure > 0) {
-        fdp.thickness = freehand_thickness * (0.5f + pressure * 3) * thickness_zoom_factor;
+    // Mouse has negative pressure; real tablet events retain their [0, 1]
+    // pressure instead of being forced to a uniform pen width.
+    const float width_factor = sioyek_stroke_mesh::pressure_width_factor(
+        pressure, FREEHAND_PRESSURE_MIN_WIDTH, FREEHAND_PRESSURE_GAMMA);
+    sioyek_stroke_mesh::Point current = {
+        mouse_abspos.x, mouse_abspos.y,
+        freehand_thickness * width_factor * thickness_zoom_factor
+    };
+    if (!points.empty()) {
+        const auto& last = points.back();
+        current = sioyek_stroke_mesh::smooth_input(
+            {last.pos.x, last.pos.y, last.thickness},
+            current, FREEHAND_INPUT_SMOOTHING);
+        const float dx = current.x - last.pos.x;
+        const float dy = current.y - last.pos.y;
+        if (dx * dx + dy * dy < 1e-8f) {
+            points.back().thickness = current.thickness;
+            return;
+        }
     }
-    else {
-        fdp.thickness = freehand_thickness * thickness_zoom_factor;
-    }
-    opengl_widget->current_drawing.points.push_back(fdp);
+    FreehandDrawingPoint fdp;
+    fdp.pos = AbsoluteDocumentPos{current.x, current.y};
+    fdp.thickness = current.thickness;
+    points.push_back(fdp);
 }
 
 void MainWidget::start_drawing() {
@@ -11189,21 +11198,23 @@ void MainWidget::set_current_freehand_alpha(float alpha) {
     freehand_alpha = alpha;
 }
 
-int MainWidget::get_top_bar_width() const {
-    const int window_width = std::max(1, width());
-    const float ratio = std::clamp(TOP_BAR_WIDTH_RATIO, 0.3f, 1.0f);
-    return std::clamp(static_cast<int>(std::lround(window_width * ratio)), 1, window_width);
-}
-
 void MainWidget::update_top_bar_geometry() {
-    const int bar_width = get_top_bar_width();
-    const int x = (width() - bar_width) / 2;
+    // Keep the original full window length; configure vertical thickness only.
+    const int thickness = std::clamp(TOP_BAR_HEIGHT, 28, 100);
     if (text_command_line_edit_container) {
-        text_command_line_edit_container->setGeometry(
-            x, 0, bar_width, get_status_bar_height());
+        text_command_line_edit_container->setGeometry(0, 0, width(), thickness);
     }
-    if (desktop_draw_toolbar_ && desktop_draw_toolbar_->width() != bar_width) {
-        desktop_draw_toolbar_->setFixedWidth(bar_width);
+    if (desktop_draw_toolbar_) {
+        desktop_draw_toolbar_->setFixedHeight(thickness);
+        const int button_height = std::clamp(thickness - 6, 24, 34);
+        for (auto* action : desktop_size_actions_) {
+            if (auto* button = qobject_cast<QToolButton*>(desktop_draw_toolbar_->widgetForAction(action)))
+                button->setFixedSize(32, button_height);
+        }
+        for (auto* action : desktop_color_actions_) {
+            if (auto* button = qobject_cast<QToolButton*>(desktop_draw_toolbar_->widgetForAction(action)))
+                button->setFixedSize(32, button_height);
+        }
     }
 }
 
@@ -11235,9 +11246,9 @@ void MainWidget::create_desktop_draw_toolbar() {
     desktop_draw_toolbar_->setObjectName("desktopDrawControls");
     desktop_draw_toolbar_->setMovable(false);
     desktop_draw_toolbar_->setFloatable(false);
-    desktop_draw_toolbar_->setToolButtonStyle(Qt::ToolButtonTextBesideIcon);
-    desktop_draw_toolbar_->setSizePolicy(QSizePolicy::Fixed, QSizePolicy::Fixed);
-    desktop_draw_toolbar_->setIconSize(QSize(18, 18));
+    desktop_draw_toolbar_->setToolButtonStyle(Qt::ToolButtonTextOnly);
+    desktop_draw_toolbar_->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Fixed);
+    desktop_draw_toolbar_->setIconSize(QSize(22, 22));
     desktop_draw_toolbar_->setMinimumWidth(0);
     desktop_draw_toolbar_->hide();
 
@@ -11284,6 +11295,10 @@ void MainWidget::create_desktop_draw_toolbar() {
         action->setCheckable(true);
         sizes->addAction(action);
         desktop_size_actions_.push_back(action);
+        if (auto* button = qobject_cast<QToolButton*>(desktop_draw_toolbar_->widgetForAction(action))) {
+            button->setToolButtonStyle(Qt::ToolButtonTextOnly);
+            button->setFixedSize(32, std::clamp(TOP_BAR_HEIGHT - 6, 24, 34));
+        }
         connect(action, &QAction::triggered, this, [this, action]() {
             set_freehand_thickness(action->data().toFloat());
             if (freehand_drawing_mode == DrawingMode::None) {
@@ -11307,6 +11322,10 @@ void MainWidget::create_desktop_draw_toolbar() {
         action->setCheckable(true);
         colors->addAction(action);
         desktop_color_actions_.push_back(action);
+        if (auto* button = qobject_cast<QToolButton*>(desktop_draw_toolbar_->widgetForAction(action))) {
+            button->setToolButtonStyle(Qt::ToolButtonIconOnly);
+            button->setFixedSize(32, std::clamp(TOP_BAR_HEIGHT - 6, 24, 34));
+        }
         connect(action, &QAction::triggered, this, [this, action]() {
             current_freehand_type = action->data().toChar().toLatin1();
             if (freehand_drawing_mode == DrawingMode::None) {
@@ -11385,21 +11404,28 @@ void MainWidget::update_desktop_draw_toolbar() {
         action->setChecked(current_freehand_type == type);
         const int index = type - 'a';
         const float* rgb = &HIGHLIGHT_COLORS[3 * index];
-        QPixmap swatch(20, 20);
+        // Render the color disc at device resolution for sharp HiDPI icons.
+        const qreal dpr = std::max<qreal>(1.0, desktop_draw_toolbar_->devicePixelRatioF());
+        constexpr int icon_size = 22;
+        QPixmap swatch(qRound(icon_size * dpr), qRound(icon_size * dpr));
+        swatch.setDevicePixelRatio(dpr);
         swatch.fill(Qt::transparent);
-        QPainter painter(&swatch);
-        painter.setRenderHint(QPainter::Antialiasing);
-        painter.setPen(QPen(Qt::gray, 1));
-        painter.setBrush(convert_float3_to_qcolor(rgb));
-        painter.drawEllipse(QRectF(2, 2, 16, 16));
+        {
+            QPainter painter(&swatch);
+            painter.setRenderHint(QPainter::Antialiasing, true);
+            painter.setPen(Qt::NoPen);
+            painter.setBrush(convert_float3_to_qcolor(rgb));
+            painter.drawEllipse(QRectF(2, 2, 18, 18));
+        }
         action->setIcon(QIcon(swatch));
     }
     desktop_draw_toolbar_->setStyleSheet(
         "QToolBar { " + get_ui_stylesheet(false) +
-        " border-bottom: 1px solid palette(mid); spacing: 3px; padding: 4px; }"
-        " QToolButton { border: 1px solid transparent; padding: 5px 7px; }"
+        " border-bottom: 1px solid palette(mid); spacing: 3px; padding: 2px; }"
+        // Shared compact rectangular selection frame for Size and Color.
+        " QToolButton { border: 1px solid transparent; padding: 0; margin: 0; }"
         " QToolButton:hover { border-color: palette(mid); }"
-        " QToolButton:checked { border-color: palette(highlight); }"
+        " QToolButton:checked { border: 1px solid palette(highlight); }"
     );
 }
 
