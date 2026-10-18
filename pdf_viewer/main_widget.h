@@ -589,6 +589,7 @@ public:
     void toggle_pen_drawing_mode();
     void set_pen_drawing_mode(bool enabled);
     void set_hand_drawing_mode(bool enabled);
+    void update_pen_feedback();
     void handle_drawing_ui_visibilty();
 
     void toggle_dark_mode();

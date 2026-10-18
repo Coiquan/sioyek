@@ -105,6 +105,10 @@
 
 #include "main_widget.h"
 
+#ifdef Q_OS_WIN
+#include <QtCore/qt_windows.h>
+#endif
+
 #ifdef SIOYEK_ANDROID
 #include <QtCore/private/qandroidextras_p.h>
 #endif
@@ -6921,6 +6925,12 @@ int MainWidget::num_visible_links() {
 
 bool MainWidget::event(QEvent* event) {
 
+#ifdef Q_OS_WIN
+    if (event->type() == QEvent::WinIdChange && freehand_drawing_mode != DrawingMode::None) {
+        update_pen_feedback();
+    }
+#endif
+
     QTabletEvent* te = dynamic_cast<QTabletEvent*>(event);
     QKeyEvent* ke = dynamic_cast<QKeyEvent*>(event);
     if (ke && (ke->type() == QEvent::KeyPress)) {
@@ -8657,7 +8667,30 @@ std::string MainWidget::get_current_mode_string() {
 
 }
 
+void MainWidget::update_pen_feedback() {
+#ifdef Q_OS_WIN
+    if (!effectiveWinId()) return;
+    static const auto set_feedback = reinterpret_cast<decltype(&SetWindowFeedbackSetting)>(
+        GetProcAddress(GetModuleHandleW(L"user32.dll"), "SetWindowFeedbackSetting"));
+    if (!set_feedback) return;
+
+    const bool drawing = freehand_drawing_mode != DrawingMode::None;
+    const BOOL disabled = FALSE;
+    const FEEDBACK_TYPE types[] = {
+        FEEDBACK_PEN_BARRELVISUALIZATION, FEEDBACK_PEN_TAP,
+        FEEDBACK_PEN_DOUBLETAP, FEEDBACK_PEN_PRESSANDHOLD,
+        FEEDBACK_PEN_RIGHTTAP
+    };
+    for (const auto type : types) {
+        // Reset to the system setting on exit, rather than forcing feedback on.
+        set_feedback(reinterpret_cast<HWND>(effectiveWinId()), type, 0,
+                     drawing ? sizeof(disabled) : 0, drawing ? &disabled : nullptr);
+    }
+#endif
+}
+
 void MainWidget::handle_drawing_ui_visibilty() {
+    update_pen_feedback();
     if (desktop_draw_toolbar_) {
         // Both drawing modes use the same desktop toolbar. Hiding the drawing
         // mode must also hide the toolbar, including when exiting via Esc.
